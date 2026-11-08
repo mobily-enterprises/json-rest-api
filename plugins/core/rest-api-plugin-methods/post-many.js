@@ -277,7 +277,7 @@ export default async function postManyMethod ({
 
     await runHooks('beforeDataCallPostMany')
     // Parents are locked once for the batch, in the transaction.
-    await lockRelationshipTargets(api, context.transaction, parents)
+    await lockRelationshipTargets(api, context.transaction, parents, { keyShare: true })
 
     const attributes = []
     const supplied = []

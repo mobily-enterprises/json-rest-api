@@ -2,6 +2,7 @@ import { RestApiResourceError, RestApiValidationError } from '../../../../lib/re
 import { validateRelationshipDataCardinality } from '../querying-writing/relationship-contracts.js'
 import { whereInIdentifiers } from '../querying/identifier-query.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
+import { databaseFamily } from '../querying-writing/database-capabilities.js'
 
 export const lockRelationshipParent = async ({ context, helpers, scopeName }) => {
   if (!context.transaction) return
@@ -17,9 +18,15 @@ export const lockRelationshipParent = async ({ context, helpers, scopeName }) =>
   }
 }
 
-// Not PostgreSQL's FOR KEY SHARE: it would not conflict with lockRelationshipParent's
-// UPDATE, so writes from opposite ends of one many-to-many edge could both insert it.
-const lockTargetRows = (query, exclusive) => exclusive ? query.forUpdate() : query.forShare()
+// A shared target lock keeps the row from being deleted. A to-one parent's
+// (keyShare) is PostgreSQL's FOR KEY SHARE, the lock a foreign key check takes,
+// which a lock read with lockMode 'noKeyUpdate' (FOR NO KEY UPDATE) does not
+// block. A many-to-many target's stays FOR SHARE: FOR KEY SHARE would not
+// conflict with lockRelationshipParent's UPDATE, so writes from opposite ends of
+// one edge could both insert it.
+const lockTargetRows = (query, { exclusive, keyShare }, db) => exclusive
+  ? query.forUpdate()
+  : keyShare && databaseFamily(db) === 'pg' ? query.forKeyShare() : query.forShare()
 
 /**
  * Lock referenced rows and fail when one no longer exists.
@@ -30,10 +37,11 @@ const lockTargetRows = (query, exclusive) => exclusive ? query.forUpdate() : que
  * @param {any} api
  * @param {any} transaction
  * @param {Array<{ type: string, id: string }>} identifiers
- * @param {{ exclusive?: boolean | Set<string> }} [options] - Lock every target, or targets of these types, for update
+ * @param {{ exclusive?: boolean | Set<string>, keyShare?: boolean }} [options] - Lock every target, or targets of
+ *   these types, for update; keyShare: the targets are to-one parents, whose shared lock is FOR KEY SHARE on PostgreSQL
  * @returns {Promise<Array<{ type: string, id: string }>>} Each database identity once, in its first submitted spelling
  */
-export const lockRelationshipTargets = async (api, transaction, identifiers, { exclusive = false } = {}) => {
+export const lockRelationshipTargets = async (api, transaction, identifiers, { exclusive = false, keyShare = false } = {}) => {
   if (!transaction) return identifiers
   const isExclusive = type => exclusive instanceof Set ? exclusive.has(type) : exclusive
   const targets = []
@@ -57,7 +65,7 @@ export const lockRelationshipTargets = async (api, transaction, identifiers, { e
     const idColumn = adapter.getIdColumn()
     const rows = await applyDatabaseReadOptions(lockTargetRows(adapter.buildBaseQuery({ transaction })
       .modify(whereInIdentifiers, idColumn, group.map(target => target.value))
-      .orderBy(`${adapter.getTableName()}.${idColumn}`), isExclusive(type)).select({ [idColumn]: databaseIdentityExpression(transaction, idColumn) }))
+      .orderBy(`${adapter.getTableName()}.${idColumn}`), { exclusive: isExclusive(type), keyShare }, transaction).select({ [idColumn]: databaseIdentityExpression(transaction, idColumn) }))
     for (const row of rows) found.add(String(row[idColumn]))
   }
   for (const { type, id, value, adapter } of targets) {
@@ -65,7 +73,7 @@ export const lockRelationshipTargets = async (api, transaction, identifiers, { e
     // Let the database resolve alternate spellings under its column collation.
     if (!resources.get(type).found.has(storedId)) {
       const record = await applyDatabaseReadOptions(lockTargetRows(adapter.buildBaseQuery({ transaction })
-        .where(adapter.getIdColumn(), value), isExclusive(type)).first({ [adapter.getIdColumn()]: databaseIdentityExpression(transaction, adapter.getIdColumn()) }))
+        .where(adapter.getIdColumn(), value), { exclusive: isExclusive(type), keyShare }, transaction).first({ [adapter.getIdColumn()]: databaseIdentityExpression(transaction, adapter.getIdColumn()) }))
       if (!record) {
         throw new RestApiResourceError(`Related ${type} with id ${id} not found`, {
           subtype: 'not_found', resourceType: type, resourceId: id

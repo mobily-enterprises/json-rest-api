@@ -401,6 +401,31 @@ transaction that has already read keeps that snapshot, and if another
 connection has written since, taking the write lock fails with
 `SQLITE_BUSY_SNAPSHOT`; roll back and run the transaction again.
 
+### Lock mode
+
+`FOR UPDATE` on PostgreSQL also blocks the foreign key checks of other
+transactions: inserting a row that references a locked row, or changing a
+reference to point at it, waits until the lock is released. When the
+transaction will not change the locked rows' primary key, or any unique column
+a foreign key references, pass `lockMode: 'noKeyUpdate'` to `lockByIds`,
+`lockWhere`, `claim` or `patchWhere`. PostgreSQL then takes `FOR NO KEY UPDATE`
+(`FOR NO KEY UPDATE SKIP LOCKED` for `claim`). Other transactions still cannot
+update, delete or lock those rows, but they can insert and change rows that
+reference them, also through this library, whose writes check a belongs-to
+parent with `FOR KEY SHARE` on PostgreSQL. A many-to-many link to a locked row
+still waits. The default, `'update'`, keeps
+`FOR UPDATE`. MySQL, MariaDB and SQLite have no such mode and take the locks in
+the table above for either value. Any other value fails with
+`RestApiValidationError` before a statement runs.
+
+```js
+await api.transaction(async transaction => {
+  // Child rows that reference these accounts can still be inserted meanwhile.
+  await api.resources.accounts.lockByIds({ ids, lockMode: 'noKeyUpdate', transaction }, context)
+  await api.resources.accounts.patchWhere({ filters: { status: 'open' }, data: { balance_checked_at: new Date() }, lockMode: 'noKeyUpdate', transaction }, context)
+})
+```
+
 ## Lock versions
 
 `lockVersionField` names a stored, non-nullable integer field that the library

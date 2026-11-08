@@ -10,7 +10,7 @@ import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { chunk } from '../lib/storage/many-row-data-helpers.js'
 import { filterToOneResponseLinkage, snapshotReadRecord } from './common.js'
-import { refuseDuplicateIds, requireLockTransaction, resolveMissing, validateFilters } from './many-row-common.js'
+import { refuseDuplicateIds, requireLockTransaction, resolveLockMode, resolveMissing, validateFilters } from './many-row-common.js'
 
 export const SCOPED_QUERY_PURPOSES = new Set(['report', 'bulk-write', 'lock', 'claim'])
 const DEFAULT_QUERY_ALL_PAGE = 1000
@@ -121,8 +121,10 @@ async function finishLockedRead ({ document, context, scope, scopes, scopeName, 
   })
 }
 
+// Returns the lock mode, validated with the rest before any statement.
 async function setupLockRead ({ params, context, vars, helpers, scopes, scopeName }, operation, storageHelper) {
   requireLockTransaction({ transaction: params.transaction, scopeName, operation })
+  const lockMode = resolveLockMode(params.lockMode)
   if (typeof helpers[storageHelper] !== 'function') {
     throw new RestApiBulkWriteUnsupportedError({ resourceType: scopeName, operation, reason: 'its storage plugin has no row locks (AnyAPI storage has none)' })
   }
@@ -139,6 +141,7 @@ async function setupLockRead ({ params, context, vars, helpers, scopes, scopeNam
   }
   context.queryParams = { fields: fields ?? {} }
   await validateRequestedFieldsets(context, scopes)
+  return lockMode
 }
 
 /**
@@ -151,7 +154,7 @@ async function setupLockRead ({ params, context, vars, helpers, scopes, scopeNam
  */
 export async function lockByIdsMethod (args) {
   const { params, context, helpers, scope, scopes, runHooks, hasHooks, scopeName, scopeOptions, vars } = args
-  await setupLockRead(args, 'lockByIds', 'dataLockByIds')
+  const lockMode = await setupLockRead(args, 'lockByIds', 'dataLockByIds')
   if (!Array.isArray(params.ids) || !params.ids.length) throw invalid('ids', 'ids must be a non-empty array')
   const ids = params.ids.map(id => requireExistingResourceId(id, { scopeOptions, vars, scopeName }))
   const storageAdapter = helpers.getStorageAdapter(scopeName)
@@ -169,7 +172,7 @@ export async function lockByIdsMethod (args) {
     .map(entry => entry.id)
   const document = { data: [] }
   for (const part of chunk(sorted, 1000)) {
-    document.data.push(...(await helpers.dataLockByIds({ scopeName, context, runHooks, ids: part })).data)
+    document.data.push(...(await helpers.dataLockByIds({ scopeName, context, runHooks, ids: part, lockMode })).data)
   }
   if (document.data.length < ids.length && missing === 'throw') {
     throw new RestApiRecordsNotFoundError({ resourceType: scopeName, missing: ids.length - document.data.length })
@@ -186,10 +189,10 @@ export async function lockByIdsMethod (args) {
  */
 export async function lockWhereMethod (args) {
   const { params, context, vars, helpers, scope, scopes, runHooks, hasHooks, scopeName } = args
-  await setupLockRead(args, 'lockWhere', 'dataLockWhere')
+  const lockMode = await setupLockRead(args, 'lockWhere', 'dataLockWhere')
   const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
-  const document = await helpers.dataLockWhere({ scopeName, context, runHooks, filters, limit: MAX_LOCK_WHERE + 1 })
+  const document = await helpers.dataLockWhere({ scopeName, context, runHooks, filters, limit: MAX_LOCK_WHERE + 1, lockMode })
   if (document.data.length > MAX_LOCK_WHERE) throw new RestApiRowLimitError({ resourceType: scopeName, rowLimit: MAX_LOCK_WHERE, operation: 'lockWhere' })
   return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks })
 }
@@ -201,7 +204,7 @@ export async function lockWhereMethod (args) {
  */
 export async function claimMethod (args) {
   const { params, context, vars, helpers, scope, scopes, runHooks, hasHooks, scopeName } = args
-  await setupLockRead(args, 'claim', 'dataClaim')
+  const lockMode = await setupLockRead(args, 'claim', 'dataClaim')
   const limit = params.limit ?? 1
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CLAIM) throw invalid('limit', `limit must be an integer from 1 to ${MAX_CLAIM}`)
   const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
@@ -216,6 +219,6 @@ export async function claimMethod (args) {
     return { field, direction: entry.startsWith('-') ? 'desc' : 'asc' }
   })
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
-  const document = await helpers.dataClaim({ scopeName, context, runHooks, filters, sort, limit })
+  const document = await helpers.dataClaim({ scopeName, context, runHooks, filters, sort, limit, lockMode })
   return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks })
 }

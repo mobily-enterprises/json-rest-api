@@ -384,8 +384,8 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
   // The rows a by-id UPDATE or DELETE writes: the ids, onlyIf, the caller's
   // ownership conditions and, with `scoped`, the caller's scope (with a
   // selection's filters), built once (its filtering hooks record the ownership
-  // conditions).
-  const writeMatcher = async ({ scopeName, context, runHooks, scoped, onlyIf, filters }) => {
+  // conditions). `lockMode` is the row lock it takes (see lockRows).
+  const writeMatcher = async ({ scopeName, context, runHooks, scoped, onlyIf, filters, lockMode }) => {
     const storageAdapter = adapterFor(scopeName)
     const db = context.transaction
     const family = databaseFamily(db)
@@ -410,7 +410,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
       // PostgreSQL: lock the rows first, so the statement that writes them
       // starts after any wait and reads what their holder committed.
       settle: async ids => {
-        if (selection && family === 'pg') await lockRows(rowsOf(storageAdapter, db).whereIn(idColumn, ids).orderBy(idColumn), db).select(idColumn)
+        if (selection && family === 'pg') await lockRows(rowsOf(storageAdapter, db).whereIn(idColumn, ids).orderBy(idColumn), db, { lockMode }).select(idColumn)
       },
       // The ids that still match, locked. MySQL and MariaDB check a selection's
       // scope and filters in the locking read's own query block, on the
@@ -419,7 +419,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
         const query = selection && family === 'mysql'
           ? guard(scope.clone().whereIn(`${tableName}.${idColumn}`, ids)).clearSelect()
           : matching(ids)
-        const rows = await applyDatabaseReadOptions(lockRows(query, db).select(identity))
+        const rows = await applyDatabaseReadOptions(lockRows(query, db, { lockMode }).select(identity))
         // A join of the scope or the filters can repeat a row.
         return [...new Map(rows.map(row => [String(row.id), row.id])).values()]
       }
@@ -432,17 +432,17 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
    * With `scoped`, each statement carries the caller's scope (row policy
    * included) and `filters` as a subquery.
    * Returns the identifiers the statements changed.
-   * @param {{ scopeName: string, context: any, runHooks?: Function, updates: Array<{ id: string | number, row: Record<string, unknown> }>, onlyIf?: Record<string, unknown>, chunkSize: number, scoped?: boolean, filters?: Record<string, unknown> }} request
+   * @param {{ scopeName: string, context: any, runHooks?: Function, updates: Array<{ id: string | number, row: Record<string, unknown> }>, onlyIf?: Record<string, unknown>, chunkSize: number, scoped?: boolean, filters?: Record<string, unknown>, lockMode?: 'update' | 'noKeyUpdate' }} request
    * @returns {Promise<Array<string | number>>}
    */
-  const dataUpdateByIds = async ({ scopeName, context, runHooks, updates, onlyIf, chunkSize, scoped = false, filters }) => {
+  const dataUpdateByIds = async ({ scopeName, context, runHooks, updates, onlyIf, chunkSize, scoped = false, filters, lockMode }) => {
     const storageAdapter = adapterFor(scopeName)
     const db = context.transaction
     const idColumn = storageAdapter.getIdColumn()
     const family = databaseFamily(db)
     const lockVersionColumn = context.schemaInfo.lockVersionField ? storageAdapter.translateColumn(context.schemaInfo.lockVersionField) : null
     const columnCount = new Set(updates.flatMap(update => Object.keys(update.row))).size
-    const { matching, settle, locked } = await writeMatcher({ scopeName, context, runHooks, scoped, onlyIf, filters })
+    const { matching, settle, locked } = await writeMatcher({ scopeName, context, runHooks, scoped, onlyIf, filters, lockMode })
     // onlyIf, the scope and the caller's ownership narrow each statement; without them every listed id is written.
     const guarded = scoped || Boolean(onlyIf) || hasWriteConditions(context, scopeName)
     const changed = []
@@ -566,9 +566,17 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     writeLocked.add(db)
   }
 
-  const lockRows = (query, db, { skipLocked = false } = {}) => {
-    if (databaseFamily(db) === 'sqlite') return query
-    query.forUpdate()
+  /**
+   * FOR UPDATE, or with lockMode 'noKeyUpdate' on PostgreSQL FOR NO KEY UPDATE,
+   * which does not block another transaction's foreign key checks on the rows.
+   * @param {any} query @param {import('knex').Knex} db
+   * @param {{ skipLocked?: boolean, lockMode?: 'update' | 'noKeyUpdate' }} [options]
+   */
+  const lockRows = (query, db, { skipLocked = false, lockMode = 'update' } = {}) => {
+    const family = databaseFamily(db)
+    if (family === 'sqlite') return query
+    if (lockMode === 'noKeyUpdate' && family === 'pg') query.forNoKeyUpdate()
+    else query.forUpdate()
     return skipLocked ? query.skipLocked() : query
   }
 
@@ -596,12 +604,12 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
    * first: under REPEATABLE READ (MySQL, MariaDB) it would fix the snapshot
    * before the lock wait, hiding what the lock holder commits meanwhile.
    * Returns the rows the locking read saw as a JSON:API document.
-   * @param {{ scopeName: string, context: any, runHooks: Function, ids: Array<string | number> }} request
+   * @param {{ scopeName: string, context: any, runHooks: Function, ids: Array<string | number>, lockMode?: 'update' | 'noKeyUpdate' }} request
    */
-  const dataLockByIds = async ({ scopeName, context, runHooks, ids }) => {
+  const dataLockByIds = async ({ scopeName, context, runHooks, ids, lockMode }) => {
     const { query, storageAdapter, tableName, idColumn } = await lockingQuery({ scopeName, context, runHooks, operation: 'lockByIds', purpose: 'lock' })
     query.whereIn(idColumn, ids.map(id => storageAdapter.translateFilterValue('id', id))).orderBy(idColumn)
-    return readRecords({ scopeName, context, query: lockRows(query, context.db), tableName })
+    return readRecords({ scopeName, context, query: lockRows(query, context.db, { lockMode }), tableName })
   }
 
   // The index lockWhere forces on MySQL, by schema, table and the read's columns (see lockIndexFor).
@@ -656,9 +664,9 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
    * order, except on MySQL, where the read is forced onto the index that
    * lockIndexFor picks and the rows come in its order, as ORDER BY id could
    * walk the primary key.
-   * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, limit: number }} request
+   * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, limit: number, lockMode?: 'update' | 'noKeyUpdate' }} request
    */
-  const dataLockWhere = async ({ scopeName, context, runHooks, filters, limit }) => {
+  const dataLockWhere = async ({ scopeName, context, runHooks, filters, limit, lockMode }) => {
     const read = async () => {
       const { query, storageAdapter, tableName, idColumn } = await lockingQuery({ scopeName, context, runHooks, operation: 'lockWhere', purpose: 'lock', filters })
       if (databaseFamily(context.db) === 'mysql') {
@@ -666,7 +674,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
         const index = await lockIndexFor({ scopeName, context, storageAdapter, tableName, filters })
         query.from(context.db.raw('?? force index (??)', [tableName, index]))
       } else query.orderBy(idColumn)
-      return readRecords({ scopeName, context, query: lockRows(query.limit(limit), context.db), tableName })
+      return readRecords({ scopeName, context, query: lockRows(query.limit(limit), context.db, { lockMode }), tableName })
     }
     let document = await read()
     // A PostgreSQL statement finds only the rows committed when it began; after a
@@ -685,16 +693,16 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
 
   /**
    * Take up to `limit` matching rows no other transaction holds.
-   * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, sort: Array<{ field: string, direction: 'asc' | 'desc' }>, limit: number }} request
+   * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, sort: Array<{ field: string, direction: 'asc' | 'desc' }>, limit: number, lockMode?: 'update' | 'noKeyUpdate' }} request
    */
-  const dataClaim = async ({ scopeName, context, runHooks, filters, sort, limit }) => {
+  const dataClaim = async ({ scopeName, context, runHooks, filters, sort, limit, lockMode }) => {
     const db = context.db
     const claimQuery = () => lockingQuery({ scopeName, context, runHooks, operation: 'claim', purpose: 'claim', filters })
     const { query, storageAdapter, tableName, idColumn } = await claimQuery()
     for (const { field, direction } of sort) query.orderBy(`${tableName}.${storageAdapter.translateColumn(field)}`, direction)
     if (databaseFamily(db) !== 'mysql') {
       // PostgreSQL locks rows as the LIMIT takes them; SQLite has one writer.
-      return readRecords({ scopeName, context, query: lockRows(query.limit(limit), db, { skipLocked: true }), tableName })
+      return readRecords({ scopeName, context, query: lockRows(query.limit(limit), db, { skipLocked: true, lockMode }), tableName })
     }
 
     // InnoDB locks every row a locking read examines, including rows a sort

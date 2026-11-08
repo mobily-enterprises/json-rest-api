@@ -430,8 +430,14 @@ transaction with the subscriber's trusted context.
 
 Relationship writes acquire database locks after the `beforeDataCall` hooks.
 Belongs-to, polymorphic and many-to-many targets are rechecked under a shared
-lock (`FOR SHARE`, or `LOCK IN SHARE MODE` on MySQL): writers that reference the
-same row do not wait for each other, while its deletion waits for them. A target
+lock (`FOR SHARE` on PostgreSQL, `LOCK IN SHARE MODE` on MySQL and MariaDB):
+writers that reference the same row do not wait for each other, while its
+deletion waits for them. On PostgreSQL a belongs-to or polymorphic parent takes
+`FOR KEY SHARE`, the lock its foreign key checks take, so a transaction holding
+the parent with `lockMode: 'noKeyUpdate'` does not block them either (see
+[Lock mode](34-scoped-reads-and-locks.md#lock-mode)). A many-to-many target
+keeps `FOR SHARE`, which serializes two writes that add one edge from its
+opposite ends. A target
 the write also changes, such as a versioned parent whose revision it advances or
 a child moved by a reverse relationship, is locked `FOR UPDATE` instead. A hook
 that updates a referenced row upgrades the shared lock and can deadlock with a

@@ -155,7 +155,7 @@ export default async function putMethod ({
 
     // A parent whose revision this write advances is updated, not just referenced.
     await lockRelationshipTargets(api, context.transaction, belongsToTargets, {
-      exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo)
+      exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo), keyShare: true
     })
 
     if (!context.isCreate && (manyToManyRelationships.length || reverseRelationships.length)) {

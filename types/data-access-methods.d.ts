@@ -41,6 +41,10 @@ export interface UpsertOptions<Input extends object> {
   // merge only: fields to update; default every stored field the rows supply but the keys.
   merge?: Array<keyof Input & string>
 }
+// The row lock of a lock read or patchWhere: 'update' (default) is FOR UPDATE. 'noKeyUpdate'
+// is FOR NO KEY UPDATE on PostgreSQL, which lets other transactions insert or change rows whose
+// foreign keys reference the locked ones; MySQL, MariaDB and SQLite take FOR UPDATE for it.
+export type LockMode = 'update' | 'noKeyUpdate'
 // patchWhere and deleteWhere need filters, or all: true to act on every visible row.
 export type WhereScope = { filters: Record<string, unknown>; all?: never } | { filters?: never; all: true }
 type Patchable<Input extends object> = { [Field in keyof Input]?: Input[Field] | RawValue }
@@ -99,7 +103,7 @@ export interface DataAccessMethods<
     context?: Context
   ): Promise<ManyRowResult<Format, Returning, Fields, Type>>
   patchWhere<Format extends ResourceFormat = DefaultFormat, Returning extends ManyRowReturning = 'none'>(
-    params: ManyRowWriteOptions<Format, Returning> & SharedPatchInput<Input, Type> & Omit<PatchConditionOptions<Input>, 'missing'> & WhereScope,
+    params: ManyRowWriteOptions<Format, Returning> & SharedPatchInput<Input, Type> & Omit<PatchConditionOptions<Input>, 'missing'> & WhereScope & { lockMode?: LockMode },
     context?: Context
   ): Promise<ManyRowResult<Format, Returning, Fields, Type>>
   deleteMany<Returning extends 'none' | 'minimal' | 'count' = 'none'>(
@@ -116,6 +120,7 @@ export interface DataAccessMethods<
     ids: DirectResourceId[]
     transaction: ManagedTransaction | Knex.Transaction
     missing?: MissingRows
+    lockMode?: LockMode
     format?: Format
     queryParams?: { fields?: Record<string, string> }
   }, context?: Context): Promise<RecordsResult<Format, Fields, Type>>
@@ -125,6 +130,7 @@ export interface DataAccessMethods<
   lockWhere<Format extends ResourceFormat = DefaultFormat>(params: {
     transaction: ManagedTransaction | Knex.Transaction
     filters?: Record<string, unknown>
+    lockMode?: LockMode
     format?: Format
     queryParams?: { fields?: Record<string, string> }
   }, context?: Context): Promise<RecordsResult<Format, Fields, Type>>
@@ -135,6 +141,7 @@ export interface DataAccessMethods<
     // Stored fields, '-' for descending; default ['id'].
     sort?: string[]
     limit?: number
+    lockMode?: LockMode
     format?: Format
     queryParams?: { fields?: Record<string, string> }
   }, context?: Context): Promise<RecordsResult<Format, Fields, Type>>

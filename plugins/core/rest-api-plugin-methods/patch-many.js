@@ -28,6 +28,7 @@ import {
   rejectBulkOptions,
   requireWhereScope,
   resolveChunkSize,
+  resolveLockMode,
   resolveManyRowReturning,
   resolveMissing,
   selectManyInput,
@@ -95,7 +96,7 @@ function resolveOnlyIf (onlyIf, { schemaInfo, storageAdapter }) {
  * `selection` (patchWhere) gives the filters that found the ids: its rows are
  * never missing, and the write answers with the rows it changed.
  * @param {any} args
- * @param {{ operation: string, entries: Array<{ id: unknown, document: any, raw: Record<string, unknown> }>, started?: boolean, selection?: { filters?: Record<string, unknown> } }} batch
+ * @param {{ operation: string, entries: Array<{ id: unknown, document: any, raw: Record<string, unknown> }>, started?: boolean, selection?: { filters?: Record<string, unknown>, lockMode?: 'update' | 'noKeyUpdate' } }} batch
  */
 async function runPatchMany (args, { operation, entries, started = false, selection }) {
   const { params, context, vars, helpers, scope, runHooks, hasHooks, perRecordHooks, scopeOptions, scopeName, api } = args
@@ -190,7 +191,7 @@ async function runPatchMany (args, { operation, entries, started = false, select
   context.ids = keptRows.map(row => String(row.rowContext.id))
   context.inputRecords = keptRows.map(row => row.rowContext.inputRecord)
   await runHooks('beforeDataCallPatchMany')
-  await lockRelationshipTargets(api, context.transaction, parents)
+  await lockRelationshipTargets(api, context.transaction, parents, { keyShare: true })
 
   const updates = []
   for (const { rowContext, raw, index } of keptRows) {
@@ -204,7 +205,7 @@ async function runPatchMany (args, { operation, entries, started = false, select
   }
 
   const changed = new Set((updates.length
-    ? await helpers.dataUpdateByIds({ scopeName, context, runHooks, updates, onlyIf, chunkSize, scoped, filters: selection?.filters })
+    ? await helpers.dataUpdateByIds({ scopeName, context, runHooks, updates, onlyIf, chunkSize, scoped, filters: selection?.filters, lockMode: selection?.lockMode })
     : []).map(String))
   // A row that left the caller's scope after the visibility read is not written.
   const unchanged = updates.length - changed.size
@@ -317,6 +318,7 @@ export async function patchWhereMethod (args) {
     }
     const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
     requireWhereScope({ filters, all: params.all, missing: params.missing, operation: 'patchWhere' })
+    const lockMode = resolveLockMode(params.lockMode)
     // The visible ids are read in the write's transaction, so open it first.
     await beginWriteTransaction(context, params.transaction, helpers.newTransaction, args.runHooks)
     context.db = context.transaction
@@ -326,7 +328,7 @@ export async function patchWhereMethod (args) {
       return context.returning === 'count' ? { meta: { count: 0 } } : context.returning === 'none' ? undefined : { data: [] }
     }
     return await runPatchMany(args, {
-      operation: 'patchWhere', entries: entriesFor(ids, shared, { scopeName, schemaInfo: context.schemaInfo }), started: true, selection: { filters }
+      operation: 'patchWhere', entries: entriesFor(ids, shared, { scopeName, schemaInfo: context.schemaInfo }), started: true, selection: { filters, lockMode }
     })
   } catch (error) {
     await handleWriteMethodError(error, context, 'PATCH_WHERE', scopeName, log)

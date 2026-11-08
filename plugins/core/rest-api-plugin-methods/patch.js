@@ -113,7 +113,7 @@ export default async function patchMethod ({
 
     // A parent whose revision this write advances is updated, not just referenced.
     await lockRelationshipTargets(api, context.transaction, belongsToTargets, {
-      exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo)
+      exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo), keyShare: true
     })
 
     if (manyToManyRelationships.length || reverseRelationships.length) {

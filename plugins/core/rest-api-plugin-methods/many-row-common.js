@@ -113,6 +113,22 @@ export function resolveMissing (value) {
 }
 
 /**
+ * The row lock a lock read or patchWhere takes. 'noKeyUpdate' takes FOR NO KEY
+ * UPDATE on PostgreSQL, which lets other transactions insert or update rows
+ * whose foreign keys reference the locked ones; elsewhere it is FOR UPDATE.
+ * @param {unknown} value
+ * @returns {'update' | 'noKeyUpdate'}
+ */
+export function resolveLockMode (value) {
+  if (value === undefined) return 'update'
+  if (value !== 'update' && value !== 'noKeyUpdate') {
+    const message = "lockMode is 'update' or 'noKeyUpdate'"
+    throw new RestApiValidationError(message, { fields: ['lockMode'], violations: [{ field: 'lockMode', rule: 'lock_mode', message }] })
+  }
+  return value
+}
+
+/**
  * The records of a many-row write: `data: [...]` in the plain format, or
  * `document: { data: [...] }` in JSON:API.
  * @param {Record<string, any>} params

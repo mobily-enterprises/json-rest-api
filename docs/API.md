@@ -1309,7 +1309,7 @@ it throws `RestApiRowLimitError`. Works on both storages.
 await resource.postMany({ data | document, onConflict, returning, format, queryParams, chunkSize, transaction }, context)
 await resource.patchMany({ data | document, onlyIf, missing, returning, format, queryParams, chunkSize, transaction }, context)
 await resource.patchWhereIds({ ids, data | document, onlyIf, missing, returning, format, queryParams, chunkSize, transaction }, context)
-await resource.patchWhere({ filters | all: true, data | document, onlyIf, returning, format, queryParams, chunkSize, transaction }, context)
+await resource.patchWhere({ filters | all: true, data | document, onlyIf, lockMode, returning, format, queryParams, chunkSize, transaction }, context)
 await resource.deleteMany({ ids, missing, returning, chunkSize, transaction }, context)
 await resource.deleteWhere({ filters | all: true, returning, chunkSize, transaction }, context)
 ```
@@ -1324,6 +1324,7 @@ await resource.deleteWhere({ filters | all: true, returning, chunkSize, transact
 | `onlyIf` | Compare-and-set: only rows whose stored values equal these change and are returned. |
 | `missing` | Id lists only: `'throw'` (default; `RestApiRecordsNotFoundError`, 404) or `'skip'` for ids the caller cannot see. `patchWhere` and `deleteWhere` refuse it: they write the rows their selection finds, with the scope and filters inside each write, and return only the rows written. |
 | `chunkSize` | Rows per statement (default 500), lowered to the database's parameter limit. |
+| `lockMode` | `patchWhere` only: the row lock its selection takes before the write, as for the lock reads below. |
 | `transaction` | A transaction from `api.transaction` to join; otherwise the call owns one. |
 
 Each call is all-or-nothing. Every row is validated, stamped, passed through
@@ -1350,9 +1351,9 @@ many-to-many or reverse relationships, file fields, or positions.
 
 ```javascript
 await api.transaction(async transaction => {
-  const { data: locked } = await resource.lockByIds({ ids, transaction, missing, format, queryParams: { fields } }, context)
-  const { data: matching } = await resource.lockWhere({ filters, transaction, format, queryParams: { fields } }, context)
-  const { data: taken } = await resource.claim({ filters, sort, limit, transaction, format, queryParams: { fields } }, context)
+  const { data: locked } = await resource.lockByIds({ ids, transaction, missing, lockMode, format, queryParams: { fields } }, context)
+  const { data: matching } = await resource.lockWhere({ filters, transaction, lockMode, format, queryParams: { fields } }, context)
+  const { data: taken } = await resource.claim({ filters, sort, limit, transaction, lockMode, format, queryParams: { fields } }, context)
 })
 ```
 
@@ -1377,6 +1378,13 @@ other transaction holds (`SKIP LOCKED`), in `sort` order (stored fields, default
 `['id']`). A row policy that joins tables is refused for all three. On SQLite,
 which has one writer, they take the database's write lock with a write that
 changes nothing, then read.
+
+`lockMode` picks the row lock: `'update'` (default) takes `FOR UPDATE`, and
+`'noKeyUpdate'` takes `FOR NO KEY UPDATE` on PostgreSQL, which still excludes
+other writers of the rows but lets other transactions insert or change rows
+whose foreign keys reference them. Use it when the transaction will not change
+the locked rows' primary key or the unique columns foreign keys reference.
+MySQL, MariaDB and SQLite take their usual lock for either mode.
 
 A resource option `lockVersionField: 'lock_version'` names a stored integer
 that every update (single, many-row and upsert merge) sets to `column + 1`.

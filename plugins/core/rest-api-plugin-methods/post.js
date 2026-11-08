@@ -118,7 +118,7 @@ export default async function postMethod ({
 
     // A parent whose revision this write advances is updated, not just referenced.
     await lockRelationshipTargets(api, context.transaction, belongsToTargets, {
-      exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo)
+      exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo), keyShare: true
     })
 
     await applyFieldSetters(context, api, helpers)

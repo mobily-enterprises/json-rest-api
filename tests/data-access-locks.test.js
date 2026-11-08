@@ -10,6 +10,7 @@ import {
 import { storageMode } from './helpers/storage-mode.js'
 import { databaseClient } from './helpers/test-database.js'
 import { connectionId, waitForLockWait } from './helpers/lock-wait.js'
+import { holdManagedTransaction } from './helpers/transaction-completion.js'
 import { createDataAccessFixture, seedLedger, workspaceA, workspaceB } from './fixtures/data-access-api.js'
 
 const cause = error => error?.cause ?? error
@@ -452,6 +453,133 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
         fixture.api.resources.da_jobs.claim({ filters: { state: 'queued' }, transaction }, { ...workspaceA(), joinPolicy: true }),
         error => isA(RestApiValidationError)(error) && JSON.stringify(cause(error).details).includes('claim_single_table')
       )
+    })
+  })
+
+  // A parent row that child rows reference through a real foreign key.
+  describe('lockMode', () => {
+    const anyContext = () => ({})
+    before(async () => {
+      await fixture.knex.schema.createTable('da_lm_parents', table => {
+        table.increments('id')
+        // lockWhere on MySQL and MariaDB needs an index that starts with a filtered column.
+        table.string('name', 40).notNullable().index()
+        table.string('note', 40).nullable()
+      })
+      await fixture.knex.schema.createTable('da_lm_children', table => {
+        table.increments('id')
+        table.integer('parent_id').unsigned().notNullable().references('id').inTable('da_lm_parents')
+      })
+      await fixture.api.addResource('da_lm_parents', {
+        schema: {
+          id: { type: 'id' },
+          name: { type: 'string', required: true, max: 40, search: true },
+          note: { type: 'string', nullable: true, max: 40 }
+        },
+        tableName: 'da_lm_parents'
+      })
+      await fixture.api.addResource('da_lm_children', {
+        schema: {
+          id: { type: 'id' },
+          parent_id: { type: 'number', required: true, belongsTo: 'da_lm_parents', as: 'parent' }
+        },
+        tableName: 'da_lm_children'
+      })
+    })
+    const seedParents = async () => {
+      await fixture.knex('da_lm_children').delete()
+      await fixture.knex('da_lm_parents').delete()
+      await fixture.knex('da_lm_parents').insert([{ id: 1, name: 'p1' }, { id: 2, name: 'p2' }])
+    }
+    const parents = () => fixture.api.resources.da_lm_parents
+    const holds = {
+      lockByIds: (transaction, lockMode) => parents().lockByIds({ ids: ['1'], lockMode, transaction }, anyContext()),
+      lockWhere: (transaction, lockMode) => parents().lockWhere({ filters: { name: 'p1' }, lockMode, transaction }, anyContext()),
+      claim: (transaction, lockMode) => parents().claim({ filters: { name: 'p1' }, lockMode, transaction }, anyContext()),
+      patchWhere: (transaction, lockMode) => parents().patchWhere({ filters: { name: 'p1' }, data: { note: 'held' }, lockMode, transaction }, anyContext())
+    }
+    // 'waits' when the work blocks on a row lock, 'proceeds' when it ends without one.
+    const outcomeWhileHeld = async ({ hold, work }) => {
+      const holder = await holdManagedTransaction(fixture.api)
+      const other = await holdManagedTransaction(fixture.api)
+      try {
+        await hold(holder.transaction)
+        const id = await connectionId(other.transaction)
+        const pending = work(other.transaction)
+        const outcome = await waitForLockWait(fixture.knex, id, pending).then(() => 'waits', () => pending.then(() => 'proceeds'))
+        await holder.commit()
+        const result = await pending
+        await other.commit()
+        return { outcome, result }
+      } finally {
+        for (const held of [holder, other]) if (!held.transaction.isCompleted()) await held.rollback()
+      }
+    }
+    const insertChild = transaction => fixture.api.resources.da_lm_children.post({ data: { parent: '1' }, returning: 'none', transaction }, anyContext())
+
+    it('refuses an unknown lock mode before any statement', async () => {
+      await seedParents()
+      const control = /^\s*(begin|commit|rollback|savepoint|release|start transaction|set transaction)\b/i
+      const statements = []
+      const record = ({ sql }) => { if (!control.test(sql)) statements.push(sql) }
+      fixture.knex.on('query', record)
+      try {
+        for (const [name, hold] of Object.entries(holds)) {
+          statements.length = 0
+          let refusal
+          // A refused patchWhere rolls back the transaction it joined, so each hold has its own.
+          await fixture.api.transaction(async transaction => {
+            refusal = await hold(transaction, 'share').then(() => undefined, error => error)
+            if (refusal) throw refusal
+          }).catch(() => {})
+          assert.equal(refusal?.code, 'REST_API_VALIDATION', name)
+          assert.ok(JSON.stringify(refusal.details).includes('lockMode'), name)
+          assert.deepEqual(statements, [], name)
+        }
+        // The listener sees a transaction's statements.
+        await fixture.api.transaction(transaction => transaction('da_lm_parents').count({ rows: '*' }))
+        assert.equal(statements.length, 1)
+      } finally {
+        fixture.knex.off('query', record)
+      }
+    })
+
+    it('holds child inserts with update, and lets them through with noKeyUpdate on PostgreSQL only', { skip: !serverDatabase && 'SQLite has one writer' }, async () => {
+      for (const [name, hold] of Object.entries(holds)) {
+        for (const lockMode of [undefined, 'update', 'noKeyUpdate']) {
+          await seedParents()
+          const { outcome } = await outcomeWhileHeld({ hold: transaction => hold(transaction, lockMode), work: insertChild })
+          // InnoDB's foreign key check takes a shared lock, which any exclusive lock blocks.
+          const expected = lockMode === 'noKeyUpdate' && databaseClient === 'pg' ? 'proceeds' : 'waits'
+          assert.equal(outcome, expected, `${name} ${lockMode ?? 'default'}`)
+          assert.equal((await fixture.knex('da_lm_children').where({ parent_id: 1 })).length, 1)
+        }
+      }
+    })
+
+    it('with noKeyUpdate still holds the row against other locks and writes', { skip: !serverDatabase && 'SQLite has one writer' }, async () => {
+      const others = {
+        'lockByIds update': transaction => holds.lockByIds(transaction, 'update'),
+        'lockByIds noKeyUpdate': transaction => holds.lockByIds(transaction, 'noKeyUpdate'),
+        patch: transaction => parents().patch({ id: '1', data: { note: 'changed' }, returning: 'none', transaction }, anyContext())
+      }
+      for (const [name, work] of Object.entries(others)) {
+        await seedParents()
+        const { outcome } = await outcomeWhileHeld({ hold: transaction => holds.lockByIds(transaction, 'noKeyUpdate'), work })
+        assert.equal(outcome, 'waits', name)
+      }
+    })
+
+    it('claim with noKeyUpdate skips a row another transaction holds in either mode', { skip: !serverDatabase && 'SQLite has one writer' }, async () => {
+      for (const lockMode of ['update', 'noKeyUpdate']) {
+        await seedParents()
+        const { outcome, result } = await outcomeWhileHeld({
+          hold: transaction => holds.lockByIds(transaction, lockMode),
+          work: transaction => parents().claim({ filters: {}, sort: ['id'], lockMode: 'noKeyUpdate', transaction }, anyContext())
+        })
+        assert.equal(outcome, 'proceeds', lockMode)
+        assert.deepEqual(result.data.map(record => String(record.id)), ['2'], lockMode)
+      }
     })
   })
 })
