@@ -7,7 +7,7 @@ const require = createRequire(import.meta.url)
 for (const peer of ['express', 'socket.io', 'redis', 'formidable', 'busboy', 'fractional-indexing']) {
   assert.throws(() => require.resolve(peer), { code: 'MODULE_NOT_FOUND' })
 }
-assert.equal(Object.keys(library).length, 30)
+assert.equal(Object.keys(library).length, 39)
 assert.equal((await import('json-rest-api/plugins/core/connectors/express-plugin.js')).ExpressPlugin, library.ExpressPlugin)
 assert.equal((await import('json-rest-api/plugins/storage/local-storage.js')).LocalStorage, library.LocalStorage)
 
