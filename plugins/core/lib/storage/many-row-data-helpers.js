@@ -328,21 +328,47 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     return needIds ? ids : undefined
   }
 
-  // The WHERE of a by-id UPDATE or DELETE: the ids, onlyIf, the caller's
+  // The rows a by-id UPDATE or DELETE writes: the ids, onlyIf, the caller's
   // ownership conditions and, with `scoped`, the caller's scope (with a
-  // selection's filters) as a subquery, built once (its filtering hooks record
-  // the ownership conditions).
+  // selection's filters), built once (its filtering hooks record the ownership
+  // conditions).
   const writeMatcher = async ({ scopeName, context, runHooks, scoped, onlyIf, filters }) => {
     const storageAdapter = adapterFor(scopeName)
     const db = context.transaction
+    const family = databaseFamily(db)
     const tableName = storageAdapter.getTableName()
     const idColumn = storageAdapter.getIdColumn()
+    const identity = { id: databaseIdentityExpression(db, `${tableName}.${idColumn}`) }
     const scope = scoped ? (await dataScopedQuery({ scopeName, context, runHooks, purpose: 'bulk-write', filters })).query : null
-    return ids => {
-      const query = applyWriteConditions({
-        query: applyOnlyIf(db(tableName).whereIn(idColumn, ids), onlyIf || {}), context, scopeName, storageAdapter, tableName
-      })
+    const guard = query => applyWriteConditions({ query: applyOnlyIf(query, onlyIf || {}, tableName), context, scopeName, storageAdapter, tableName })
+    // The WHERE of the write, with the scope as a subquery.
+    const matching = ids => {
+      const query = guard(db(tableName).whereIn(idColumn, ids))
       return scope ? query.whereIn(idColumn, scope.clone().whereIn(`${tableName}.${idColumn}`, ids).clearSelect().select(`${tableName}.${idColumn}`)) : query
+    }
+    // A selection's filters must hold for a row as it is once locked, after any
+    // wait for another writer, or two writers that both matched the old row
+    // would both write it. A subquery does not see that row: InnoDB reads it
+    // from the transaction snapshot, PostgreSQL as of the statement's start.
+    const selection = Boolean(scope && filters && Object.keys(filters).length)
+    return {
+      matching,
+      // PostgreSQL: lock the rows first, so the statement that writes them
+      // starts after any wait and reads what their holder committed.
+      settle: async ids => {
+        if (selection && family === 'pg') await lockRows(db(tableName).whereIn(idColumn, ids).orderBy(idColumn), db).select(idColumn)
+      },
+      // The ids that still match, locked. MySQL and MariaDB check a selection's
+      // scope and filters in the locking read's own query block, on the
+      // current row.
+      locked: async ids => {
+        const query = selection && family === 'mysql'
+          ? guard(scope.clone().whereIn(`${tableName}.${idColumn}`, ids)).clearSelect()
+          : matching(ids)
+        const rows = await applyDatabaseReadOptions(lockRows(query, db).select(identity))
+        // A join of the scope or the filters can repeat a row.
+        return [...new Map(rows.map(row => [String(row.id), row.id])).values()]
+      }
     }
   }
 
@@ -363,7 +389,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const family = databaseFamily(db)
     const lockVersionColumn = context.schemaInfo.lockVersionField ? storageAdapter.translateColumn(context.schemaInfo.lockVersionField) : null
     const columnCount = new Set(updates.flatMap(update => Object.keys(update.row))).size
-    const matching = await writeMatcher({ scopeName, context, runHooks, scoped, onlyIf, filters })
+    const { matching, settle, locked } = await writeMatcher({ scopeName, context, runHooks, scoped, onlyIf, filters })
     // onlyIf, the scope and the caller's ownership narrow each statement; without them every listed id is written.
     const guarded = scoped || Boolean(onlyIf) || hasWriteConditions(context, scopeName)
     const changed = []
@@ -403,10 +429,12 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
           continue
         }
         // Otherwise lock the rows that match, then update exactly those.
-        const matched = await applyDatabaseReadOptions(lockRows(matching(ids), db).select({ id: databaseIdentityExpression(db, idColumn) }))
-        if (matched.length && writes) await db(tableName).whereIn(idColumn, matched.map(row => row.id)).update(set)
-        changed.push(...matched.map(row => row.id))
+        await settle(ids)
+        const matched = await locked(ids)
+        if (matched.length && writes) await db(tableName).whereIn(idColumn, matched).update(set)
+        changed.push(...matched)
       } else {
+        await settle(ids)
         const rows = await applyDatabaseReadOptions(matching(ids).returning({ id: databaseIdentityExpression(db, idColumn) }).update(set))
         changed.push(...rows.map(row => row.id))
       }
@@ -429,13 +457,14 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const tableName = storageAdapter.getTableName()
     const idColumn = storageAdapter.getIdColumn()
     const identity = { id: databaseIdentityExpression(db, idColumn) }
-    const matching = await writeMatcher({ scopeName, context, runHooks, scoped, filters })
+    const { matching, settle, locked } = await writeMatcher({ scopeName, context, runHooks, scoped, filters })
     const guarded = scoped || hasWriteConditions(context, scopeName)
     const deleted = []
     for (const part of chunk(ids, rowsPerStatement(db, chunkSize, scoped ? 2 : 1))) {
       let values = part.map(id => storageAdapter.translateFilterValue('id', id))
       if (guarded && family === 'pg') {
         // The scope and the caller's ownership narrow the DELETE, which returns the rows it removed.
+        await settle(values)
         values = (await applyDatabaseReadOptions(matching(values).returning(identity).delete())).map(row => row.id)
       } else if (guarded && family === 'sqlite') {
         // Knex reads no rows back from a SQLite DELETE, so its RETURNING runs as
@@ -444,7 +473,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
         values = (await db.raw('? returning ? as ??', [matching(values).delete(), identity.id, 'id'])).map(row => row.id)
       } else if (guarded) {
         // MySQL cannot return deleted rows: lock the rows that still match, then delete exactly those.
-        values = (await applyDatabaseReadOptions(lockRows(matching(values), db).select(identity))).map(row => row.id)
+        values = await locked(values)
         if (values.length) await db(tableName).whereIn(idColumn, values).delete()
       } else {
         await db(tableName).whereIn(idColumn, values).delete()
@@ -652,10 +681,10 @@ const sameValue = (left, right) => {
   return false
 }
 
-function applyOnlyIf (query, onlyIf) {
+function applyOnlyIf (query, onlyIf, tableName) {
   for (const [column, value] of Object.entries(onlyIf)) {
-    if (value === null) query.whereNull(column)
-    else query.where(column, value)
+    if (value === null) query.whereNull(`${tableName}.${column}`)
+    else query.where(`${tableName}.${column}`, value)
   }
   return query
 }

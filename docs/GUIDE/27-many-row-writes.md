@@ -189,6 +189,16 @@ longer matches in the meantime is left out. The result lists the rows actually
 written, and the methods never throw `RestApiRecordsNotFoundError`; they take no
 `missing` option.
 
+The filters are checked on each row as it is once locked, so a selection write
+is a compare-and-set on them: of two transactions whose filters matched the
+same row, the one that waits for the other's lock finds the row the other
+committed, and leaves it out if it no longer matches. PostgreSQL locks the rows
+first, so the statement that writes them starts after the wait; MySQL and
+MariaDB check the scope and the filters in the locking read itself, which
+therefore also locks the rows it reads from any table the filters or the row
+policy join. With MariaDB's `innodb_snapshot_isolation` on, the waiting
+transaction fails instead ("Record has changed since last read"); retry it.
+
 The UPDATE, DELETE and lock statements repeat the caller's ownership
 (autofilter) conditions as plain column predicates. A row that another
 transaction moves to a different owner between the visibility read and the

@@ -309,6 +309,41 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
     assert.deepEqual(locked.data.map(record => String(record.id)), ['1', '100'])
   })
 
+  // A selection write is a compare-and-set on its filters: of two transactions
+  // whose filters matched the same row, the second, waiting for the first's
+  // lock, re-checks them on the row the first committed and changes nothing.
+  for (const snapshotIsolation of isMysql ? ['OFF', 'ON'] : [undefined]) {
+    const name = snapshotIsolation ? ` (innodb_snapshot_isolation ${snapshotIsolation})` : ''
+    it(`patchWhere and deleteWhere re-check their filters on the row a concurrent writer committed${name}`, { skip: !serverDatabase && 'SQLite has one writer' }, async t => {
+      if (snapshotIsolation) {
+        try {
+          await fixture.knex.raw('SELECT @@innodb_snapshot_isolation')
+        } catch {
+          return t.skip('the server has no innodb_snapshot_isolation')
+        }
+      }
+      const entries = fixture.api.resources.da_entries
+      const open = { filters: { code: 'E1', status: 'open' }, returning: 'count' }
+      const take = transaction => entries.patchWhere({ ...open, data: { status: 'held' }, transaction }, workspaceA())
+      const second = {
+        patchWhere: transaction => entries.patchWhere({ ...open, data: { amount: 999 }, transaction }, workspaceA()),
+        deleteWhere: transaction => entries.deleteWhere({ ...open, transaction }, workspaceA())
+      }
+      for (const [method, waiter] of Object.entries(second)) {
+        await seedLedger(fixture)
+        let first
+        const outcome = await whileWaiting({ snapshotIsolation, hold: async transaction => { first = await take(transaction) }, write: () => {}, waiter })
+          .then(result => result.meta.count, error => error)
+        assert.equal(first.meta.count, 1)
+        // With snapshot isolation, InnoDB refuses the stale row instead.
+        if (snapshotIsolation === 'ON' && outcome instanceof Error) assert.match(String(cause(outcome)?.message), /changed since last read/i, method)
+        else assert.equal(outcome, 0, method)
+        const row = await fixture.knex('da_entries').where({ id: 1 }).first()
+        assert.deepEqual({ status: row?.status, amount: Number(row?.amount) }, { status: 'held', amount: 10 }, method)
+      }
+    })
+  }
+
   it('claims matching rows in sort order inside the scope', async () => {
     await seedJobs()
     const jobs = fixture.api.resources.da_jobs
