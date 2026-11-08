@@ -6,9 +6,10 @@ import { whereInIdentifiers } from '../querying/identifier-query.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 import { assertVersionedRelationshipTransaction, hasVersionedInverse, invalidateManyToManyVersions } from './resource-version.js'
 
-// Advances the versions of parents linked to a deleted record. The caller has
-// deleted the record's row, which holds its exclusive lock against link writers.
-export async function invalidateDeletedPivotTargets (api, scopeName, context) {
+// Advances the versions of parents linked to a record about to be deleted.
+// When there are such parents, `lockRow` first locks the record's row against
+// link writers, and answers not found when it has gone.
+export async function invalidateDeletedPivotTargets (api, scopeName, context, lockRow) {
   const relationships = []
   for (const [parentType, parent] of Object.entries(api.resources)) {
     if (!parent.vars.schemaInfo?.versionField) continue
@@ -19,6 +20,7 @@ export async function invalidateDeletedPivotTargets (api, scopeName, context) {
   }
   if (!relationships.length) return
   assertVersionedRelationshipTransaction(api, relationships[0], context.transaction)
+  await lockRow()
   const id = api.knex.helpers.getStorageAdapter(scopeName).translateFilterValue('id', context.id)
   for (const inverse of relationships) {
     const pivot = getPivotStorage(api, inverse)

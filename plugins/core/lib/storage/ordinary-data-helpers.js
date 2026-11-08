@@ -8,8 +8,8 @@ import { buildJsonApiResponse } from '../querying/knex-json-api-transformers-que
 import { toJsonApiRecordWithBelongsTo } from '../querying-writing/knex-json-api-transformers.js'
 import { processIncludes } from '../querying/knex-process-includes.js'
 import { loadRelationshipIdentifiers } from '../querying/relationship-identifiers.js'
-import { applyQueryConstraint, applyWriteConditions } from '../querying/query-constraint.js'
-import { countsMatchedRows } from './many-row-data-helpers.js'
+import { applyQueryConstraint } from '../querying/query-constraint.js'
+import { deleteFoundRow, foundRow, lockFoundRow, updateFoundRow } from './single-row-writes.js'
 import { runAggregateQuery } from '../querying/aggregate-query.js'
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
 import { getOperationDiagnosticContext } from '../../../../lib/error-context.js'
@@ -33,41 +33,6 @@ function advanceLockVersion (row, context, storageAdapter, db) {
   if (!field) return
   const column = storageAdapter.translateColumn(field)
   row[column] = db.raw('?? + 1', [column])
-}
-
-/**
- * @param {string} scopeName
- * @param {string | number} id
- */
-const resourceNotFound = (scopeName, id) => new RestApiResourceError('Resource not found', {
-  subtype: ERROR_SUBTYPES.NOT_FOUND,
-  resourceType: scopeName,
-  resourceId: id
-})
-
-/**
- * The row a single write found with its scoped read, by id and the owner that
- * read recorded: a row that has gone or moved to another owner since is not
- * matched.
- * @param {{ db: import('./storage-types.js').StorageDatabase, context: any, scopeName: string, storageAdapter: import('./storage-types.js').StorageAdapter, tableName: string, idProperty: string, id: string | number }} target
- */
-const foundRow = ({ db, context, scopeName, storageAdapter, tableName, idProperty, id }) => () => applyWriteConditions({
-  query: db(tableName).where(`${tableName}.${idProperty}`, id), context, scopeName, storageAdapter, tableName
-})
-
-/**
- * Updates the row a single write found, or, with nothing stored to change,
- * checks it is still there with a locking read. Not found when it is not.
- * @param {() => any} row
- * @param {{ db: any, scopeName: string, tableName: string, idProperty: string, id: string | number, values: StorageRow }} update
- */
-async function updateFoundRow (row, { db, scopeName, tableName, idProperty, id, values }) {
-  const stillThere = () => row().select(`${tableName}.${idProperty}`).forUpdate().first()
-  const found = Object.keys(values).length > 0
-    // MySQL without FOUND_ROWS counts the rows an UPDATE changed: an unchanged row counts zero.
-    ? await row().update(values) || (!await countsMatchedRows(db) && await stillThere())
-    : await stillThere()
-  if (!found) throw resourceNotFound(scopeName, id)
 }
 
 /** @param {OrdinaryDataDependencies} dependencies */
@@ -677,8 +642,8 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     // Updates cannot replace the primary key.
     delete finalAttributes[idProperty]
     advanceLockVersion(finalAttributes, context, storageAdapter, db)
-    const row = foundRow({ db, context, scopeName, storageAdapter, tableName, idProperty, id })
-    await updateFoundRow(row, { db, scopeName, tableName, idProperty, id, values: finalAttributes })
+    const row = foundRow({ byId: () => db(tableName).where(`${tableName}.${idProperty}`, id), context, scopeName, storageAdapter, tableName })
+    await updateFoundRow(row, { db, scopeName, id, idColumn: `${tableName}.${idProperty}`, values: finalAttributes })
   }
 
   /** @type {OrdinaryDataWriteHelpers['dataPatch']} */
@@ -708,8 +673,8 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     delete finalAttributes[idProperty]
     advanceLockVersion(finalAttributes, context, storageAdapter, db)
 
-    const row = foundRow({ db, context, scopeName, storageAdapter, tableName, idProperty, id })
-    await updateFoundRow(row, { db, scopeName, tableName, idProperty, id, values: finalAttributes })
+    const row = foundRow({ byId: () => db(tableName).where(`${tableName}.${idProperty}`, id), context, scopeName, storageAdapter, tableName })
+    await updateFoundRow(row, { db, scopeName, id, idColumn: `${tableName}.${idProperty}`, values: finalAttributes })
   }
 
   /** @type {OrdinaryDataWriteHelpers['dataDelete']} */
@@ -724,11 +689,10 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
 
     log.debug(`[Knex] DELETE ${tableName}/${id}`)
 
-    // A DELETE counts the rows it removed, FOUND_ROWS or not. From here on it
-    // holds the row's exclusive lock, which invalidating its links needs.
-    const row = foundRow({ db, context, scopeName, storageAdapter, tableName, idProperty, id })
-    if (!await row().delete()) throw resourceNotFound(scopeName, id)
-    await invalidateDeletedPivotTargets(api, scopeName, context)
+    const row = foundRow({ byId: () => db(tableName).where(`${tableName}.${idProperty}`, id), context, scopeName, storageAdapter, tableName })
+    // Before the DELETE: an ON DELETE CASCADE would remove the links that tell which parents to advance.
+    await invalidateDeletedPivotTargets(api, scopeName, context, () => lockFoundRow(row, { scopeName, id, idColumn: `${tableName}.${idProperty}` }))
+    await deleteFoundRow(row, { scopeName, id })
     await deletePivotReferences(api, scopeName, context)
 
     return { success: true }

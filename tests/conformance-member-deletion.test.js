@@ -91,6 +91,35 @@ if (storageMode.mode === 'knex') {
           assert.deepEqual((await fixture.api.resources.groups.getRelationship({ id: parent.id, relationshipName: 'members' })).data, [])
         }
       })
+
+      // Registers a hook, so it runs last.
+      it('answers not found for a member whose row vanished before its delete, and advances no revision', async () => {
+        const parent = await fixture.seed('groups', { name: 'Parent' })
+        const child = await fixture.seed('items', { name: 'Child' }, { collections: { data: [{ type: 'groups', id: parent.id }] } })
+        const revision = async () => (await fixture.api.resources.groups.get({ id: parent.id, format: 'plain' })).revision
+        const token = await revision()
+        await fixture.api.customize({
+          hooks: {
+            beforeDataCallDelete: {
+              functionName: 'member-deletion-vanish',
+              batch: true,
+              // As another writer's delete: under CASCADE the database removes the links itself.
+              handler: async ({ context }) => {
+                if (!context.vanish) return
+                if (rule === 'RESTRICT') await context.transaction('conformance_memberships').where('child_key', context.id).delete()
+                await context.transaction('conformance_items').where('id', context.id).delete()
+              }
+            }
+          }
+        })
+        await assert.rejects(fixture.api.resources.items.delete({ id: child.id }, { vanish: true }), error => {
+          const cause = error.cause ?? error
+          return cause.subtype === 'not_found' && cause.message === 'Resource not found'
+        })
+        assert.equal(await revision(), token)
+        assert.equal(await fixture.count('items'), 1, 'the vanished row came back with the rollback')
+        assert.equal(await fixture.count('memberships'), 1)
+      })
     })
   }
 }
