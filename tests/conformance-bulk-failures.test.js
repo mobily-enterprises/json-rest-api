@@ -8,7 +8,7 @@ import { storageMode } from './helpers/storage-mode.js'
 
 // Many-row writes are all-or-nothing: inside a caller's transaction their rows
 // stay pending until the owner commits, and a failure leaves the owner to roll back.
-describe(`Many-row write transactions (${storageMode.mode})`, { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, () => {
+describe(`Many-row write transactions (${storageMode.mode})`, () => {
   let fixture, items, first, second
   const rollbackRequested = new Error('Callback requested rollback')
 

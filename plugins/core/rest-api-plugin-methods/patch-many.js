@@ -312,7 +312,7 @@ export async function patchWhereMethod (args) {
     setupManyWrite(args, 'patchWhere')
     const shared = selectSharedRecord(params, { scopeName, schemaInfo: context.schemaInfo })
     if (typeof helpers.dataVisibleIds !== 'function') {
-      throw unsupported(scopeName, 'patchWhere', 'its storage plugin has no many-row support (AnyAPI storage takes single writes)')
+      throw unsupported(scopeName, 'patchWhere', 'its storage plugin has no many-row support')
     }
     const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
     requireWhereScope({ filters, all: params.all, missing: params.missing, operation: 'patchWhere' })

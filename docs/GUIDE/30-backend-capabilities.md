@@ -89,10 +89,11 @@ the documented data migration, not just a package update. See
 
 ## Many-row writes, locks and aggregates
 
-[Many-row writes](27-many-row-writes.md), row locks and `lockVersionField`
-([chapter 34](34-scoped-reads-and-locks.md)) need table storage
-(`RestApiKnexPlugin`). Resources on AnyAPI storage refuse them with
-`RestApiBulkWriteUnsupportedError`. `queryAll`, `aggregate` without date
+[Many-row writes](27-many-row-writes.md) work on both storages; on AnyAPI their
+upserts take only the id as key ([AnyAPI storage](27-many-row-writes.md#anyapi-storage)).
+Row locks, claims and `lockVersionField` ([chapter 34](34-scoped-reads-and-locks.md))
+need table storage (`RestApiKnexPlugin`). Resources on AnyAPI storage refuse
+them with `RestApiBulkWriteUnsupportedError`. `queryAll`, `aggregate` without date
 buckets, shared rows and system contexts work on both storages; so does
 `scopedQuery`, though on AnyAPI it reads canonical rows whose fields live in
 storage slots.

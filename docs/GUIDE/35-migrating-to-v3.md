@@ -305,11 +305,12 @@ field NULL, also when an optional (`required: false`) filter does not resolve.
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,
-`dataInsertMany`, `dataUpdateByIds`, `dataDeleteByIds`, `dataLockByIds` and
-`dataClaim`. They are optional: a storage plugin without them keeps working,
+`dataInsertMany`, `dataUpdateByIds`, `dataDeleteByIds`, `dataLockByIds`,
+`dataLockWhere` and `dataClaim`. They are optional: a storage plugin without them keeps working,
 and the new methods refuse its resources with
 `RestApiBulkWriteUnsupportedError`. `RestApiKnexPlugin` implements all of them;
-`RestApiAnyapiKnexPlugin` implements only `dataScopedQuery`.
+`RestApiAnyapiKnexPlugin` implements all but the lock helpers `dataLockByIds`,
+`dataLockWhere` and `dataClaim` (in 3.0.0 it implemented only `dataScopedQuery`).
 
 ## Verify the port
 

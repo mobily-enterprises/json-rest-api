@@ -316,7 +316,7 @@ describe(`Resource write lifecycle (${storageMode.mode})`, () => {
   }
 })
 
-describe(`Composed many-row lifecycle (${storageMode.mode})`, { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, () => {
+describe(`Composed many-row lifecycle (${storageMode.mode})`, () => {
   let fixture, enabled, failureStage, records
   const events = []
   const primary = new RestApiValidationError('Roll back many-row work')

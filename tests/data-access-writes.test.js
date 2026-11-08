@@ -15,7 +15,14 @@ import { createDataAccessFixture, seedLedger, workspaceA, workspaceB } from './f
 
 const cause = error => error?.cause ?? error
 const isA = Class => error => cause(error) instanceof Class
-const tableOnly = storageMode.isAnyApi() && 'many-row writes need table storage'
+// AnyAPI resources have no lock version, and the canonical table's only unique key is the id.
+const noLockVersion = storageMode.isAnyApi() && 'AnyAPI resources have no lock version'
+const idKeysOnly = storageMode.isAnyApi() && 'AnyAPI storage has a unique key only on the id'
+// Rows on table storage keep their id type; a canonical logical id is text.
+const rowsById = async (fixture, table, ids) => {
+  const wanted = ids.map(String)
+  return (await fixture.rows(table)).filter(row => wanted.includes(String(row.id)))
+}
 
 const newEntries = (count, { start = 100, account = 1 } = {}) => Array.from({ length: count }, (_, index) => ({
   code: `N${start + index}`,
@@ -29,15 +36,10 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
   before(async () => { fixture = await createDataAccessFixture() })
   after(async () => { await fixture?.close() })
 
-  it('refuses many-row writes and locks on AnyAPI storage', { skip: !storageMode.isAnyApi() && 'AnyAPI only' }, async () => {
+  it('refuses row locks on AnyAPI storage', { skip: !storageMode.isAnyApi() && 'AnyAPI only' }, async () => {
     await seedLedger(fixture)
     const entries = fixture.api.resources.da_entries
     const refused = isA(RestApiBulkWriteUnsupportedError)
-    await assert.rejects(entries.postMany({ data: newEntries(2) }, workspaceA()), refused)
-    await assert.rejects(entries.patchMany({ data: [{ id: '1', amount: 1 }] }, workspaceA()), refused)
-    await assert.rejects(entries.patchWhere({ filters: { status: 'open' }, data: { amount: 1 } }, workspaceA()), refused)
-    await assert.rejects(entries.deleteMany({ ids: ['1'] }, workspaceA()), refused)
-    await assert.rejects(entries.deleteWhere({ filters: { status: 'open' } }, workspaceA()), refused)
     await fixture.api.transaction(async transaction => {
       await assert.rejects(entries.lockByIds({ ids: ['1'], transaction }, workspaceA()), refused)
       await assert.rejects(entries.lockWhere({ filters: { status: 'open' }, transaction }, workspaceA()), refused)
@@ -45,14 +47,14 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
     })
   })
 
-  describe('postMany', { skip: tableOnly }, () => {
+  describe('postMany', () => {
     it('stamps the owner, checks every row and returns ids in input order', async () => {
       await seedLedger(fixture)
       const entries = fixture.api.resources.da_entries
       assert.equal(await entries.postMany({ data: newEntries(2) }, workspaceA()), undefined, "returning defaults to 'none'")
       const minimal = await entries.postMany({ data: newEntries(3, { start: 200 }), returning: 'minimal' }, workspaceA())
       assert.equal(minimal.data.length, 3)
-      const created = await fixture.knex('da_entries').whereIn('id', minimal.data.map(item => item.id)).orderBy('id')
+      const created = await rowsById(fixture, 'da_entries', minimal.data.map(item => item.id))
       assert.deepEqual(created.map(row => [row.code, row.workspace_id]), [['N200', 'ws-a'], ['N201', 'ws-a'], ['N202', 'ws-a']])
       assert.deepEqual(minimal.data.map(item => item.type), ['da_entries', 'da_entries', 'da_entries'])
 
@@ -75,8 +77,7 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
       assert.equal(large.result.data.length, 200)
       assert.equal(large.statements, small.statements, `10 rows: ${small.sql.join(' | ')}\n200 rows: ${large.sql.join(' | ')}`)
 
-      const ids = large.result.data.map(item => Number(item.id))
-      const rows = await fixture.knex('da_entries').whereIn('id', ids).orderBy('id')
+      const rows = await rowsById(fixture, 'da_entries', large.result.data.map(item => item.id))
       assert.deepEqual(rows.map(row => row.code), newEntries(200).map(entry => entry.code), 'every returned id names its input row')
 
       await seedLedger(fixture)
@@ -156,7 +157,7 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
         assert.equal((await fixture.rows('da_entries')).length, 9)
       })
 
-      it('ignores the caller own duplicates and reports only inserted rows', async () => {
+      it('ignores the caller own duplicates and reports only inserted rows', { skip: idKeysOnly }, async () => {
         await seedLedger(fixture)
         const entries = fixture.api.resources.da_entries
         const rows = [
@@ -174,7 +175,7 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
         assert.equal(Number(theirs.amount), 70, 'another workspace\'s row is untouched')
       })
 
-      it('merges into the caller own rows only and never through another unique index', async () => {
+      it('merges into the caller own rows only and never through another unique index', { skip: idKeysOnly }, async () => {
         await fixture.reset()
         await fixture.seed('da_labels', [
           { id: '1', name: 'urgent', color: 'red', slug: 'a-urgent', workspace_id: 'ws-a' },
@@ -224,13 +225,15 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
         await run(() => fixture.api.transaction(async transaction => {
           await transaction.raw('SET SESSION auto_increment_increment = 2')
           const result = await entries.postMany({ data: newEntries(5), returning: 'minimal', transaction }, workspaceA())
-          const rows = await transaction('da_entries').whereIn('id', result.data.map(item => item.id)).orderBy('id')
-          assert.deepEqual(rows.map(row => row.code), newEntries(5).map(entry => entry.code), path)
+          const codes = await stored(fixture, 'da_entries', transaction).values('code')
+          assert.deepEqual(result.data.map(item => codes[item.id]), newEntries(5).map(entry => entry.code), path)
           await transaction.raw('SET SESSION auto_increment_increment = 1')
         }))
         // A trigger that rewrites rows: RETURNING still names them, but insertId
         // cannot be verified, so that path refuses the batch and rolls back.
-        await knex.raw("CREATE TRIGGER da_entries_rewrite BEFORE INSERT ON da_entries FOR EACH ROW SET NEW.code = CONCAT(NEW.code, '-x')")
+        const table = stored(fixture, 'da_entries')
+        const code = table.column('code')
+        await knex.raw("CREATE TRIGGER da_entries_rewrite BEFORE INSERT ON ?? FOR EACH ROW SET NEW.?? = CONCAT(NEW.??, '-x')", [table.name, code, code])
         try {
           const before = (await fixture.rows('da_entries')).length
           const write = () => entries.postMany({ data: newEntries(3, { start: 700 }), returning: 'minimal' }, workspaceA())
@@ -239,8 +242,8 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
             assert.equal((await fixture.rows('da_entries')).length, before)
           } else {
             const result = await run(write)
-            const rows = await knex('da_entries').whereIn('id', result.data.map(item => item.id)).orderBy('id')
-            assert.deepEqual(rows.map(row => row.code), ['N700-x', 'N701-x', 'N702-x'])
+            const codes = await table.values('code')
+            assert.deepEqual(result.data.map(item => codes[item.id]), ['N700-x', 'N701-x', 'N702-x'])
           }
         } finally {
           await knex.raw('DROP TRIGGER da_entries_rewrite')
@@ -249,7 +252,7 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
     })
   })
 
-  describe('patchMany, patchWhereIds and patchWhere', { skip: tableOnly }, () => {
+  describe('patchMany, patchWhereIds and patchWhere', () => {
     it('updates each row by id with one statement per chunk and advances the lock version', async () => {
       const entries = fixture.api.resources.da_entries
       const patchRows = count => Array.from({ length: count }, (_, index) => ({ id: String(index + 1), amount: 1000 + index, status: index % 2 ? 'held' : 'open' }))
@@ -262,8 +265,9 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
       assert.equal(large.result.data.length, 200)
       assert.equal(large.statements, small.statements, `10 rows: ${small.sql.join(' | ')}\n200 rows: ${large.sql.join(' | ')}`)
 
-      const rows = await fixture.knex('da_entries').whereIn('id', [1, 2, 3]).orderBy('id')
-      assert.deepEqual(rows.map(row => [Number(row.amount), row.status, Number(row.lock_version)]), [[1000, 'open', 1], [1001, 'held', 1], [1002, 'open', 1]])
+      const rows = await rowsById(fixture, 'da_entries', [1, 2, 3])
+      assert.deepEqual(rows.map(row => [Number(row.amount), row.status]), [[1000, 'open'], [1001, 'held'], [1002, 'open']])
+      if (!noLockVersion) assert.deepEqual(rows.map(row => Number(row.lock_version)), [1, 1, 1])
     })
 
     it('finds only the caller rows and refuses or skips the rest', async () => {
@@ -276,10 +280,10 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
           error => cause(error) instanceof RestApiRecordsNotFoundError && cause(error).details.missing === 1 && !JSON.stringify(cause(error).details).includes(`"${id}"`)
         )
       }
-      assert.equal(Number((await fixture.knex('da_entries').where({ id: 1 }).first()).amount), 10, 'refusals roll back')
+      assert.equal(Number((await rowsById(fixture, 'da_entries', [1]))[0].amount), 10, 'refusals roll back')
       const skipped = await entries.patchWhereIds({ ids: ['1', '4', '7'], data: { status: 'held' }, missing: 'skip', returning: 'minimal' }, workspaceA())
       assert.deepEqual(skipped.data.map(item => item.id), ['1'])
-      const statuses = await fixture.knex('da_entries').whereIn('id', [1, 4, 7]).orderBy('id').pluck('status')
+      const statuses = (await rowsById(fixture, 'da_entries', [1, 4, 7])).map(row => row.status)
       assert.deepEqual(statuses, ['held', 'open', 'open'])
     })
 
@@ -295,7 +299,7 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
       await assert.rejects(fixture.api.resources.da_accounts.patchMany({ data: [{ id: '1' }] }, workspaceA()), invalid, 'an empty patch row')
     })
 
-    it('advances the lock version of a row with no fields to change', async () => {
+    it('advances the lock version of a row with no fields to change', { skip: noLockVersion }, async () => {
       await seedLedger(fixture)
       const entries = fixture.api.resources.da_entries
       const touched = await entries.patchMany({ data: [{ id: '1' }, { id: '2' }], missing: 'skip', returning: 'minimal' }, workspaceA())
@@ -310,11 +314,14 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
     it('applies onlyIf as compare-and-set and returns only the changed ids', async () => {
       await seedLedger(fixture)
       const entries = fixture.api.resources.da_entries
-      await fixture.knex('da_entries').where({ id: 2 }).update({ status: 'held' })
+      const table = stored(fixture, 'da_entries')
+      await table.row('2').update({ [table.column('status')]: 'held' })
       const result = await entries.patchWhereIds({ ids: ['1', '2', '3'], data: { status: 'closed' }, onlyIf: { status: 'open' }, returning: 'minimal' }, workspaceA())
       assert.deepEqual(result.data.map(item => item.id).sort(), ['1', '3'])
-      const rows = await fixture.knex('da_entries').whereIn('id', [1, 2, 3]).orderBy('id')
-      assert.deepEqual(rows.map(row => [row.status, Number(row.lock_version)]), [['closed', 1], ['held', 0], ['closed', 1]])
+      const rows = await rowsById(fixture, 'da_entries', [1, 2, 3])
+      assert.deepEqual(rows.map(row => row.status), ['closed', 'held', 'closed'])
+      if (noLockVersion) return
+      assert.deepEqual(rows.map(row => Number(row.lock_version)), [1, 0, 1])
 
       // The lock version is the usual compare-and-set column.
       const stale = await entries.patchWhereIds({ ids: ['1'], data: { amount: 5 }, onlyIf: { lock_version: 0 }, returning: 'minimal' }, workspaceA())
@@ -325,8 +332,10 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
       await seedLedger(fixture)
       const entries = fixture.api.resources.da_entries
       const knex = fixture.knex
-      await entries.patchWhereIds({ ids: ['1', '2'], data: { amount: knex.raw('?? + ?', ['amount', 5]) } }, workspaceA())
-      assert.deepEqual((await knex('da_entries').whereIn('id', [1, 2]).orderBy('id').pluck('amount')).map(Number), [15, 25])
+      // A raw expression names stored columns: on AnyAPI, the field's slot.
+      const amount = stored(fixture, 'da_entries').column('amount')
+      await entries.patchWhereIds({ ids: ['1', '2'], data: { amount: knex.raw('?? + ?', [amount, 5]) } }, workspaceA())
+      assert.deepEqual((await rowsById(fixture, 'da_entries', [1, 2])).map(row => Number(row.amount)), [15, 25])
       await assert.rejects(entries.patchWhereIds({ ids: ['1'], data: { account: knex.raw('1') } }, workspaceA()), isA(RestApiValidationError))
     })
 
@@ -335,8 +344,12 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
       const entries = fixture.api.resources.da_entries
       const result = await entries.patchWhere({ filters: { status: 'open' }, data: { status: 'archived' }, returning: 'minimal' }, workspaceA())
       assert.equal(result.data.length, 30)
-      const counts = await fixture.knex('da_entries').select('workspace_id', 'access_group', 'status').count({ total: '*' }).groupBy('workspace_id', 'access_group', 'status').orderBy(['workspace_id', 'access_group'])
-      assert.deepEqual(counts.map(row => [row.workspace_id, row.access_group, row.status, Number(row.total)]), [
+      const counts = new Map()
+      for (const row of await fixture.rows('da_entries')) {
+        const key = JSON.stringify([row.workspace_id, row.access_group, row.status])
+        counts.set(key, (counts.get(key) || 0) + 1)
+      }
+      assert.deepEqual([...counts].sort().map(([key, total]) => [...JSON.parse(key), total]), [
         ['ws-a', 'g1', 'archived', 30], ['ws-a', 'g2', 'open', 30], ['ws-b', 'g1', 'open', 30]
       ])
       const none = await entries.patchWhere({ filters: { status: 'open' }, data: { status: 'x' }, returning: 'minimal' }, workspaceA())
@@ -344,7 +357,7 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
       await assert.rejects(entries.patchWhere({ filters: { unknown_field: 1 }, data: { status: 'x' } }, workspaceA()), isA(RestApiValidationError))
     })
 
-    it('advances the lock version on single writes too', async () => {
+    it('advances the lock version on single writes too', { skip: noLockVersion }, async () => {
       await seedLedger(fixture)
       const entries = fixture.api.resources.da_entries
       const patched = await entries.patch({ id: '1', data: { amount: 11 } }, workspaceA())
@@ -356,14 +369,21 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
     })
   })
 
-  describe('deleteMany and deleteWhere', { skip: tableOnly }, () => {
+  describe('deleteMany and deleteWhere', () => {
     it('deletes visible rows by id with flat statement counts and removes their links', async () => {
       const entries = fixture.api.resources.da_entries
       await seedLedger(fixture, { entriesPerAccount: 10 })
       const small = await fixture.measure(() => entries.deleteMany({ ids: Array.from({ length: 10 }, (_, index) => String(index + 1)), returning: 'minimal' }, workspaceA()))
       await seedLedger(fixture, { entriesPerAccount: 200 })
       await fixture.seed('da_labels', [{ id: '1', name: 'flag', workspace_id: 'ws-a' }])
-      await fixture.seed('da_entry_labels', [{ id: '1', entry_id: 1, label_id: 1 }, { id: '2', entry_id: 250, label_id: 1 }])
+      if (storageMode.isAnyApi()) {
+        // AnyAPI keeps many-to-many links in its link table.
+        for (const id of ['1', '250']) {
+          await fixture.api.anyapi.links.attachMany({ scopeName: 'da_entries', relName: 'labels', context: { id, db: fixture.knex }, relData: [{ type: 'da_labels', id: '1' }] })
+        }
+      } else {
+        await fixture.seed('da_entry_labels', [{ id: '1', entry_id: 1, label_id: 1 }, { id: '2', entry_id: 250, label_id: 1 }])
+      }
       const large = await fixture.measure(() => entries.deleteMany({ ids: Array.from({ length: 200 }, (_, index) => String(index + 1)), returning: 'minimal' }, workspaceA()))
       assert.equal(small.result.data.length, 10)
       assert.equal(large.result.data.length, 200)
@@ -393,7 +413,7 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
     })
   })
 
-  describe('batch hooks', { skip: tableOnly }, () => {
+  describe('batch hooks', () => {
     it('refuses resources with per-record hooks that have no batch form', async () => {
       await seedLedger(fixture)
       await fixture.api.addResource('da_hooked', {
@@ -445,20 +465,20 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
     })
   })
 
-  it('serves the second workspace the same way', { skip: tableOnly }, async () => {
+  it('serves the second workspace the same way', async () => {
     await seedLedger(fixture)
     const entries = fixture.api.resources.da_entries
     const created = await entries.postMany({ data: newEntries(2, { account: 3 }), returning: 'minimal' }, workspaceB())
     await entries.patchWhereIds({ ids: ['7', ...created.data.map(item => item.id)], data: { status: 'held' } }, workspaceB())
     await assert.rejects(entries.patchWhereIds({ ids: ['1'], data: { status: 'held' } }, workspaceB()), isA(RestApiRecordsNotFoundError))
-    const held = await fixture.knex('da_entries').where({ status: 'held' }).orderBy('id').pluck('workspace_id')
+    const held = (await fixture.rows('da_entries')).filter(row => row.status === 'held').map(row => row.workspace_id)
     assert.deepEqual(held, ['ws-b', 'ws-b', 'ws-b'])
   })
 })
 
 // A fixture of its own: the one above gains permission and batch hooks, which
 // keep the visibility read.
-describe(`Many-row writes that skip missing rows (${storageMode.mode})`, { skip: tableOnly }, () => {
+describe(`Many-row writes that skip missing rows (${storageMode.mode})`, () => {
   let fixture
   before(async () => { fixture = await createDataAccessFixture() })
   after(async () => { await fixture?.close() })
@@ -471,7 +491,7 @@ describe(`Many-row writes that skip missing rows (${storageMode.mode})`, { skip:
     // 4 is hidden by the row policy, 7 belongs to ws-b, 99 does not exist.
     const patched = await fixture.measure(() => entries.patchWhereIds({ ids: ['1', '4', '7', '99'], data: { status: 'held' }, missing: 'skip', returning: 'minimal' }, workspaceA()))
     assert.deepEqual(patched.result.data.map(item => item.id), ['1'])
-    assert.deepEqual(await fixture.knex('da_entries').whereIn('id', [1, 4, 7]).orderBy('id').pluck('status'), ['held', 'open', 'open'])
+    assert.deepEqual((await rowsById(fixture, 'da_entries', [1, 4, 7])).map(row => row.status), ['held', 'open', 'open'])
     const refused = await fixture.measure(() => entries.patchWhereIds({ ids: ['2', '3'], data: { status: 'held' }, returning: 'minimal' }, workspaceA()))
     // On MySQL the one row left is written by an UPDATE that answers from its count, without a locking read first.
     assert.equal(patched.statements, refused.statements - 1, `skip: ${patched.sql.join(' | ')}\nthrow: ${refused.sql.join(' | ')}`)
@@ -496,6 +516,7 @@ const stored = (fixture, scopeName, db = fixture.knex) => {
   const adapter = fixture.api.knex.helpers.getStorageAdapter(scopeName)
   const rows = () => adapter.buildBaseQuery({ transaction: db })
   return {
+    name: adapter.getTableName(),
     rows,
     row: id => rows().where(adapter.getIdColumn(), adapter.translateFilterValue('id', id)),
     column: field => adapter.translateColumn(field),
@@ -532,7 +553,7 @@ describe(`One-record write statements (${storageMode.mode})`, () => {
     assert.deepEqual(['1', '4', '7'].map(id => Number(amounts[id])), [12, 40, 70])
   })
 
-  it('skips a row with missing: \'skip\' in its guarded UPDATE, without a locking read', { skip: tableOnly }, async () => {
+  it('skips a row with missing: \'skip\' in its guarded UPDATE, without a locking read', async () => {
     await seedLedger(fixture)
     const entries = fixture.api.resources.da_entries
     const skip = (id, options = {}) => fixture.measure(() => entries.patchMany({ data: [{ id, status: 'held' }], missing: 'skip', returning: 'minimal', ...options }, workspaceA()))
@@ -558,7 +579,7 @@ describe(`One-record write statements (${storageMode.mode})`, () => {
       assert.deepEqual(written(skipped), [])
       assert.deepEqual(kinds(skipped.sql), mysql ? ['begin', 'select', 'commit'] : write, skipped.sql.join(' | '))
     }
-    assert.deepEqual(await fixture.knex('da_entries').whereIn('id', [1, 2, 3, 4, 7]).orderBy('id').pluck('status'), ['held', 'held', 'open', 'open', 'open'])
+    assert.deepEqual((await rowsById(fixture, 'da_entries', [1, 2, 3, 4, 7])).map(row => row.status), ['held', 'held', 'open', 'open', 'open'])
   })
 
   it('replaces a row after its existence check and one scoped read, or creates a missing one', async () => {
@@ -690,7 +711,7 @@ describe(`One-record writes beside a concurrent writer (${storageMode.mode})`, (
     assert.equal((await stored(fixture, 'da_accounts').values('name'))['1'], 'A visible')
   })
 
-  it('leaves out a one-row patchMany whose row moved to another workspace after the visibility read', { skip: tableOnly }, async () => {
+  it('leaves out a one-row patchMany whose row moved to another workspace after the visibility read', async () => {
     const entries = fixture.api.resources.da_entries
     const patchOne = missing => fixture.measure(() => entries.patchMany({ data: [{ id: '3', amount: 333 }], missing, returning: 'minimal' }, { ...workspaceA(), moveAway: 'da_entries' }))
     // Its UPDATE carries the owner: it matches nothing, and the move, another writer's, stands.
@@ -742,7 +763,7 @@ describe(`One-record writes without FOUND_ROWS (${storageMode.mode})`, { skip: d
     assert.deepEqual(kinds(deleted.sql), ['begin', 'select', 'delete', 'delete', 'commit'], deleted.sql.join(' | '))
   })
 
-  it('locks a one-row patchMany\'s row, then updates it once', { skip: tableOnly }, async () => {
+  it('locks a one-row patchMany\'s row, then updates it once', async () => {
     await seedLedger(fixture)
     await triggered()
     // Without counts of matched rows, the UPDATE's count cannot answer whether the row is there.
@@ -831,7 +852,7 @@ describe(`Links to targets the caller cannot see (${storageMode.mode})`, () => {
     assert.equal(many.checks, few.checks)
   })
 
-  it('keeps a hidden link in a many-row patch, row by row', { skip: tableOnly }, async () => {
+  it('keeps a hidden link in a many-row patch, row by row', async () => {
     await seedLedger(fixture)
     const entries = fixture.api.resources.da_entries
     await linkTo('2', 2)
@@ -889,7 +910,7 @@ describe(`Polymorphic links and merge upserts (${storageMode.mode})`, () => {
     return { account: value('account_id'), owner: value('owner_type') && `${value('owner_type')}:${value('owner_id')}`, amount: Number(row[tasks.column('amount')]) }
   }
 
-  it('keeps hidden links in a merge upsert and clears visible ones', { skip: tableOnly }, async () => {
+  it('keeps hidden links in a merge upsert and clears visible ones', { skip: idKeysOnly }, async () => {
     const tasks = fixture.api.resources.da_tasks
     const merge = () => tasks.postMany({ data: [{ code: 'T1', amount: 31, account: null, owner: null }], onConflict: { keys: ['workspace_id', 'code'], action: 'merge' }, returning: 'minimal' }, workspaceA())
     await seedTasks({ account_id: 2, owner_type: 'da_labels', owner_id: 2 })
@@ -913,11 +934,6 @@ describe(`Polymorphic links and merge upserts (${storageMode.mode})`, () => {
       postMany: () => tasks.postMany({ data: [{ code: 'T3', amount: 1, owner_type: 'da_labels', owner_id: '2' }], returning: 'minimal' }, workspaceA()),
       patchMany: () => tasks.patchMany({ data: [{ id: '1', owner_id: '2' }], returning: 'minimal' }, workspaceA())
     }
-    // Many-row writes need table storage; AnyAPI refuses them before reading the rows.
-    if (storageMode.isAnyApi()) {
-      delete attempts.postMany
-      delete attempts.patchMany
-    }
     for (const [name, attempt] of Object.entries(attempts)) await assert.rejects(attempt(), refused, name)
     assert.deepEqual(await linksOf(), { account: null, owner: 'da_labels:1', amount: 10 })
     // Through the relationship, the target is checked: label 2 is another workspace's.
@@ -928,7 +944,7 @@ describe(`Polymorphic links and merge upserts (${storageMode.mode})`, () => {
 })
 
 // A fixture of its own: these tests add hooks and a resource.
-describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`, { skip: tableOnly }, () => {
+describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`, () => {
   let fixture
   before(async () => { fixture = await createDataAccessFixture() })
   after(async () => { await fixture?.close() })
@@ -952,11 +968,13 @@ describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`,
     assert.deepEqual(await entries.deleteWhere({ filters: { status: 'open' }, returning: 'count' }, workspaceB()), count(3))
 
     // An upsert counts what it inserted, and with merge what it updated too.
-    const labels = fixture.api.resources.da_labels
-    await fixture.seed('da_labels', [{ id: '1', name: 'flag', workspace_id: 'ws-a' }])
-    const keys = ['workspace_id', 'name']
-    assert.deepEqual(await labels.postMany({ data: [{ name: 'flag' }, { name: 'fresh' }], onConflict: { keys, action: 'ignore' }, returning: 'count' }, workspaceA()), count(1))
-    assert.deepEqual(await labels.postMany({ data: [{ name: 'flag', color: 'red' }, { name: 'new' }], onConflict: { keys, action: 'merge', merge: ['color'] }, returning: 'count' }, workspaceA()), count(2))
+    if (!idKeysOnly) {
+      const labels = fixture.api.resources.da_labels
+      await fixture.seed('da_labels', [{ id: '1', name: 'flag', workspace_id: 'ws-a' }])
+      const keys = ['workspace_id', 'name']
+      assert.deepEqual(await labels.postMany({ data: [{ name: 'flag' }, { name: 'fresh' }], onConflict: { keys, action: 'ignore' }, returning: 'count' }, workspaceA()), count(1))
+      assert.deepEqual(await labels.postMany({ data: [{ name: 'flag', color: 'red' }, { name: 'new' }], onConflict: { keys, action: 'merge', merge: ['color'] }, returning: 'count' }, workspaceA()), count(2))
+    }
 
     await assert.rejects(entries.deleteMany({ ids: ['5'], returning: 'full' }, workspaceA()), isA(RestApiValidationError))
     await assert.rejects(entries.patch({ id: '1', data: { amount: 2 }, returning: 'count' }, workspaceA()), isA(RestApiValidationError))
@@ -975,7 +993,8 @@ describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`,
           handler: async ({ context }) => {
             const knexQuery = context.knexQuery
             if (!change || knexQuery?.scopeName !== 'da_entries' || knexQuery.queryPurpose !== 'bulk-write' || change.reads++ === 0) return
-            await change.run(knexQuery.db('da_entries').where('id', change.id))
+            const table = stored(fixture, 'da_entries', knexQuery.db)
+            await change.run(table.row(change.id), table)
           }
         }
       }
@@ -992,9 +1011,9 @@ describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`,
     assert.deepEqual(patched.data.map(item => item.id), ['1', '3'])
     // A row that stops matching the filters is left alone.
     await seedLedger(fixture)
-    const filtered = await changing(2, rows => rows.update({ status: 'closed' }), () => entries.patchWhere({ filters: { status: 'open' }, data: { status: 'held' }, returning: 'minimal' }, workspaceA()))
+    const filtered = await changing(2, (rows, table) => rows.update({ [table.column('status')]: 'closed' }), () => entries.patchWhere({ filters: { status: 'open' }, data: { status: 'held' }, returning: 'minimal' }, workspaceA()))
     assert.deepEqual(filtered.data.map(item => item.id), ['1', '3'])
-    assert.deepEqual(await fixture.knex('da_entries').whereIn('id', [1, 2, 3]).orderBy('id').pluck('status'), ['held', 'closed', 'held'])
+    assert.deepEqual((await rowsById(fixture, 'da_entries', [1, 2, 3])).map(row => row.status), ['held', 'closed', 'held'])
 
     await assert.rejects(entries.deleteWhere({ filters: { status: 'open' }, missing: 'skip' }, workspaceA()), isA(RestApiValidationError))
     await assert.rejects(entries.patchWhere({ all: true, data: { status: 'open' }, missing: 'throw' }, workspaceA()), isA(RestApiValidationError))
@@ -1009,7 +1028,10 @@ describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`,
           functionName: 'literal-question-mark',
           handler: ({ context }) => {
             const knexQuery = context.knexQuery
-            if (literal && knexQuery?.scopeName === 'da_entries' && knexQuery.queryPurpose === 'bulk-write') knexQuery.query.whereRaw("da_entries.code <> 'E?'")
+            if (literal && knexQuery?.scopeName === 'da_entries' && knexQuery.queryPurpose === 'bulk-write') {
+              // No bindings: the ? stays inside the literal.
+              knexQuery.query.whereRaw(`${knexQuery.tableName}.${stored(fixture, 'da_entries').column('code')} <> 'E?'`)
+            }
           }
         }
       }
@@ -1019,12 +1041,13 @@ describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`,
       const deleted = await fixture.api.resources.da_entries.deleteMany({ ids: ['1', '2'], missing: 'skip', returning: 'minimal' }, workspaceA())
       assert.deepEqual(deleted.data.map(item => item.id), ['1', '2'])
     } finally { literal = false }
-    assert.deepEqual(await fixture.knex('da_entries').whereIn('id', [1, 2, 3]).pluck('id'), [3])
+    assert.deepEqual((await rowsById(fixture, 'da_entries', [1, 2, 3])).map(row => String(row.id)), ['3'])
   })
 
   it('gives after-hooks the ids and inputs of the changed rows, in the same order', async () => {
     await seedLedger(fixture)
-    await fixture.knex('da_entries').where('id', 2).update({ status: 'held' })
+    const table = stored(fixture, 'da_entries')
+    await table.row('2').update({ [table.column('status')]: 'held' })
     const seen = []
     await fixture.api.customize({
       hooks: {
@@ -1047,7 +1070,8 @@ describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`,
     await fixture.api.addResource('da_sign_ins', {
       idProperty: 'email',
       schema: {
-        id: { type: 'string', primary: true, required: true, maxLength: 100, storage: { column: 'email' } },
+        // AnyAPI keeps the id in its logical id column.
+        id: { type: 'string', primary: true, required: true, maxLength: 100, ...(storageMode.isAnyApi() ? {} : { storage: { column: 'email' } }) },
         name: { type: 'string', required: true, max: 40 },
         visits: { type: 'integer', defaultTo: 0 }
       },
@@ -1075,16 +1099,134 @@ describe(`Selection writes, counts and upserts on the id (${storageMode.mode})`,
     const refused = isA(RestApiBulkWriteUnsupportedError)
     await assert.rejects(fixture.api.resources.da_labels.postMany({ data: [{ id: '1', name: 'flag' }], onConflict: { keys: ['id'], action: 'ignore' } }, workspaceA()), refused)
     await assert.rejects(fixture.api.resources.da_entries.postMany({ data: [{ id: '1', ...newEntries(1)[0] }], onConflict: { keys: ['id'], action: 'ignore' } }, workspaceA()), refused)
-    assert.deepEqual(await fixture.knex('da_sign_ins').orderBy('email').pluck('email'), ['ann@example.com', 'bob@example.com'])
+    assert.deepEqual((await signIns.query({ queryParams: { sort: ['id'] } })).data.map(record => record.id), ['ann@example.com', 'bob@example.com'])
   })
 })
 
-describe(`Merge upserts beside a concurrent insert (${storageMode.mode})`, { skip: tableOnly || (databaseClient === 'better-sqlite3' && 'SQLite has one writer') }, () => {
+// AnyAPI keeps every tenant's and resource's rows in one table, where a logical
+// id is unique only within its tenant and resource.
+describe(`Many-row writes on AnyAPI's shared table (${storageMode.mode})`, { skip: !storageMode.isAnyApi() && 'AnyAPI only' }, () => {
+  const OTHER_TENANT = 'other_tenant'
   let fixture
-  before(async () => { fixture = await createDataAccessFixture({ databaseOptions: { concurrent: true } }) })
+  before(async () => {
+    fixture = await createDataAccessFixture()
+    // No owners and no row policy: it takes upserts on the id.
+    await fixture.api.addResource('da_tags', {
+      schema: { id: { type: 'id' }, name: { type: 'string', required: true, max: 40 }, uses: { type: 'integer', default: 0 } },
+      tableName: 'da_tags'
+    })
+    storageMode.registerTable(fixture.knex, 'da_tags', 'da_tags', fixture.api.anyapi.tenantId)
+  })
   after(async () => { await fixture?.close() })
 
-  it('merges into a matching row another transaction committed after this one first read', async () => {
+  // The canonical rows and links of `resource` under `tenant`, by logical id.
+  const canonicalRows = (resource, tenant = fixture.api.anyapi.tenantId) =>
+    fixture.knex('any_records').where({ tenant_id: tenant, resource }).orderBy('logical_id')
+  const clearTags = () => fixture.knex('any_records').where({ resource: 'da_tags' }).delete()
+  // Another tenant's copies of entries 1–3 and of their links: none may change.
+  const seedOtherTenant = async () => {
+    await fixture.knex('any_records').where({ tenant_id: OTHER_TENANT }).delete()
+    await fixture.knex('any_links').where({ tenant_id: OTHER_TENANT }).delete()
+    const rows = (await canonicalRows('da_entries')).filter(row => ['1', '2', '3'].includes(row.logical_id))
+    await fixture.knex('any_records').insert(rows.map(({ id, ...row }) => ({ ...row, tenant_id: OTHER_TENANT })))
+    const links = await fixture.knex('any_links').where({ tenant_id: fixture.api.anyapi.tenantId })
+    if (links.length) await fixture.knex('any_links').insert(links.map(({ id, ...link }) => ({ ...link, tenant_id: OTHER_TENANT })))
+  }
+  const untouched = async () => ({
+    otherTenant: (await canonicalRows('da_entries', OTHER_TENANT)).map(({ id, ...row }) => row),
+    otherLinks: (await fixture.knex('any_links').where({ tenant_id: OTHER_TENANT }).orderBy('left_id')).map(({ id, ...link }) => link),
+    // Accounts 1–3 share the entries' logical ids in the same tenant.
+    accounts: await stored(fixture, 'da_accounts').values('name')
+  })
+
+  it('writes only its own tenant\'s and resource\'s rows under the same logical ids', async () => {
+    await seedLedger(fixture)
+    await fixture.seed('da_labels', [{ id: '1', name: 'flag', workspace_id: 'ws-a' }])
+    for (const id of ['1', '2']) {
+      await fixture.api.anyapi.links.attachMany({ scopeName: 'da_entries', relName: 'labels', context: { id, db: fixture.knex }, relData: [{ type: 'da_labels', id: '1' }] })
+    }
+    await seedOtherTenant()
+    const before = await untouched()
+    assert.equal(before.otherTenant.length, 3)
+    assert.equal(before.otherLinks.length, 2)
+    const entries = fixture.api.resources.da_entries
+    const all = { ...workspaceA(), visibility: { all: true } }
+
+    await entries.patchMany({ data: [{ id: '1', amount: 1 }, { id: '2', amount: 2 }, { id: '3', amount: 3 }], returning: 'none' }, all)
+    await entries.patchWhereIds({ ids: ['1', '2'], data: { status: 'held' }, onlyIf: { status: 'open' }, returning: 'none' }, all)
+    await entries.patchWhere({ filters: { status: 'open' }, data: { status: 'closed' }, returning: 'none' }, all)
+    assert.deepEqual((await rowsById(fixture, 'da_entries', [1, 2, 3])).map(row => [Number(row.amount), row.status]), [[1, 'held'], [2, 'held'], [3, 'closed']])
+    assert.deepEqual(await untouched(), before, 'updates')
+
+    await entries.deleteMany({ ids: ['1'], returning: 'none' }, all)
+    await entries.deleteWhere({ filters: { status: 'held' }, returning: 'none' }, all)
+    assert.deepEqual((await fixture.rows('da_entries')).map(row => row.id), ['3', '4', '5', '6', '7', '8', '9'])
+    assert.deepEqual(await fixture.rows('da_entry_labels'), [], 'the deleted entries\' links are gone')
+    assert.deepEqual(await untouched(), before, 'deletes')
+  })
+
+  it('gives each generated row its row id as logical id, with one INSERT and one UPDATE per chunk', async () => {
+    await clearTags()
+    const tags = fixture.api.resources.da_tags
+    const names = count => Array.from({ length: count }, (_, index) => ({ name: `tag ${index}` }))
+    const small = await fixture.measure(() => tags.postMany({ data: names(10), returning: 'minimal' }))
+    const large = await fixture.measure(() => tags.postMany({ data: names(200), returning: 'minimal' }))
+    assert.equal(large.statements, small.statements, `10 rows: ${small.sql.join(' | ')}\n200 rows: ${large.sql.join(' | ')}`)
+    // MySQL reads the generated ids back, MariaDB returns them, the others return them.
+    const insertIds = databaseClient === 'mysql2' && !/mariadb/i.test(fixture.api.knex.capabilities.dbInfo.version) ? ['select', 'insert', 'select'] : ['insert']
+    assert.deepEqual(kinds(small.sql), ['begin', ...insertIds, 'update', 'commit'], small.sql.join(' | '))
+
+    const rows = await canonicalRows('da_tags')
+    assert.equal(rows.length, 210)
+    assert.ok(rows.every(row => row.logical_id === String(row.id)), 'every logical id is its row id')
+    const byId = new Map(rows.map(row => [row.logical_id, row]))
+    const slot = stored(fixture, 'da_tags').column('name')
+    assert.deepEqual(large.result.data.map(item => byId.get(item.id)[slot]), names(200).map(tag => tag.name), 'every returned id names its input row')
+
+    // Explicit ids are the logical ids, in one INSERT.
+    const explicit = await fixture.measure(() => tags.postMany({ data: [{ id: '5001', name: 'Red' }, { id: '5002', name: 'Blue' }], returning: 'minimal' }))
+    assert.deepEqual(explicit.result.data.map(item => item.id), ['5001', '5002'])
+    assert.deepEqual(kinds(explicit.sql), ['begin', 'insert', 'commit'], explicit.sql.join(' | '))
+    assert.equal((await tags.get({ id: '5002' })).name, 'Blue')
+  })
+
+  it('upserts on the id within its own tenant and resource, and refuses other keys', async () => {
+    await clearTags()
+    const tags = fixture.api.resources.da_tags
+    await tags.postMany({ data: [{ id: '1', name: 'one', uses: 1 }] })
+    // The same logical id under another tenant is not a conflict.
+    const [own] = await canonicalRows('da_tags')
+    const { id, ...copy } = own
+    await fixture.knex('any_records').insert({ ...copy, tenant_id: OTHER_TENANT, logical_id: '2' })
+
+    const ignored = await tags.postMany({ data: [{ id: '1', name: 'again' }, { id: '2', name: 'two' }], onConflict: { keys: ['id'], action: 'ignore' }, returning: 'minimal' })
+    assert.deepEqual(ignored.data.map(item => item.id), ['2'])
+    const merged = await tags.postMany({ data: [{ id: '1', name: 'one', uses: 5 }, { id: '3', name: 'three' }], onConflict: { keys: ['id'], action: 'merge', merge: ['uses'] }, returning: 'minimal' })
+    assert.deepEqual(merged.data.map(item => item.id), ['1', '3'])
+    const read = await tags.query({ queryParams: { sort: ['id'] } })
+    assert.deepEqual(read.data.map(tag => [tag.id, tag.name, Number(tag.uses)]), [['1', 'one', 5], ['2', 'two', 0], ['3', 'three', 0]])
+    assert.equal((await canonicalRows('da_tags', OTHER_TENANT)).length, 1, 'the other tenant\'s row stays')
+
+    await assert.rejects(tags.postMany({ data: [{ name: 'one' }], onConflict: { keys: ['name'], action: 'ignore' } }), isA(RestApiBulkWriteUnsupportedError))
+    assert.equal((await canonicalRows('da_tags')).length, 3)
+  })
+})
+
+describe(`Merge upserts beside a concurrent insert (${storageMode.mode})`, { skip: databaseClient === 'better-sqlite3' && 'SQLite has one writer' }, () => {
+  let fixture
+  before(async () => {
+    fixture = await createDataAccessFixture({ databaseOptions: { concurrent: true } })
+    // No owners and no row policy: it takes upserts on the id, on either storage.
+    await fixture.api.addResource('da_counters', {
+      schema: { id: { type: 'id' }, name: { type: 'string', required: true, max: 40 }, uses: { type: 'integer', default: 0 } },
+      tableName: 'da_counters'
+    })
+    if (storageMode.isAnyApi()) storageMode.registerTable(fixture.knex, 'da_counters', 'da_counters', fixture.api.anyapi.tenantId)
+    else await fixture.api.resources.da_counters.createKnexTable()
+  })
+  after(async () => { await fixture?.close() })
+
+  it('merges into a matching row another transaction committed after this one first read', { skip: idKeysOnly }, async () => {
     await fixture.reset()
     const labels = fixture.api.resources.da_labels
     const merge = { keys: ['workspace_id', 'name'], action: 'merge', merge: ['color'] }
@@ -1129,16 +1271,53 @@ describe(`Merge upserts beside a concurrent insert (${storageMode.mode})`, { ski
     }
   }
 
-  it('returns a late matching row that the merge leaves unchanged', async () => {
+  it('returns a late matching row that the merge leaves unchanged', { skip: idKeysOnly }, async () => {
     // The stored values are the merged ones, so the merge changes nothing.
     const same = await mergeIntoLateLabel({ name: 'race', color: 'blue' }, 'full')
     assert.deepEqual(same.data.map(record => [record.name, record.color, record.slug]), [['race', 'blue', 'a-race']])
     assert.deepEqual(await mergeIntoLateLabel({ name: 'race', color: 'blue' }, 'count'), { meta: { count: 1 } })
   })
 
-  it('returns a late matching row when the row supplies none of the fields to merge', async () => {
+  it('returns a late matching row when the row supplies none of the fields to merge', { skip: idKeysOnly }, async () => {
     const nothing = await mergeIntoLateLabel({ name: 'race' }, 'full')
     assert.deepEqual(nothing.data.map(record => [record.name, record.color, record.slug]), [['race', 'blue', 'a-race']])
     assert.deepEqual((await fixture.rows('da_labels')).map(row => [row.name, row.color]), [['race', 'blue']])
+  })
+
+  it('merges into a record with the same id that another transaction committed after this one first read', async () => {
+    const counters = fixture.api.resources.da_counters
+    const first = await holdManagedTransaction(fixture.api)
+    try {
+      assert.deepEqual((await counters.query({ transaction: first.transaction })).data, [])
+      await counters.postMany({ data: [{ id: '5001', name: 'race', uses: 1 }] })
+      const merged = await counters.postMany({
+        data: [{ id: '5001', name: 'race', uses: 2 }],
+        onConflict: { keys: ['id'], action: 'merge', merge: ['uses'] },
+        returning: 'full',
+        transaction: first.transaction
+      })
+      assert.deepEqual(merged.data.map(record => [record.id, record.name, Number(record.uses)]), [['5001', 'race', 2]])
+      await first.commit()
+    } finally {
+      if (!first.transaction.isCompleted()) await first.rollback()
+    }
+    assert.deepEqual((await counters.query({})).data.map(record => [record.id, Number(record.uses)]), [['5001', 2]])
+
+    // A late record that the merge leaves unchanged is returned too.
+    const second = await holdManagedTransaction(fixture.api)
+    try {
+      assert.equal((await counters.query({ transaction: second.transaction })).data.length, 1)
+      await counters.postMany({ data: [{ id: '5002', name: 'late', uses: 3 }] })
+      const unchanged = await counters.postMany({
+        data: [{ id: '5002', name: 'late', uses: 3 }],
+        onConflict: { keys: ['id'], action: 'merge', merge: ['uses'] },
+        returning: 'full',
+        transaction: second.transaction
+      })
+      assert.deepEqual(unchanged.data.map(record => [record.id, record.name, Number(record.uses)]), [['5002', 'late', 3]])
+      await second.commit()
+    } finally {
+      if (!second.transaction.isCompleted()) await second.rollback()
+    }
   })
 })

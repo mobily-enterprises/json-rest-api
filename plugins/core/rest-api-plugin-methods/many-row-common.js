@@ -51,7 +51,7 @@ export const unsupported = (resourceType, operation, reason) => new RestApiBulkW
  */
 export function refuseUnsupportedResource ({ api, helpers, perRecordHooks, scopeName, schemaInfo, operation, kind, storageHelper }) {
   if (typeof helpers[storageHelper] !== 'function') {
-    throw unsupported(scopeName, operation, 'its storage plugin has no many-row support (AnyAPI storage takes single writes)')
+    throw unsupported(scopeName, operation, 'its storage plugin has no many-row support')
   }
   if (schemaInfo.versionField) {
     throw unsupported(scopeName, operation, `the resource is versioned by '${schemaInfo.versionField}'; use single writes with expectedVersion`)

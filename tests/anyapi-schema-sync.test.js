@@ -307,3 +307,16 @@ syncCase('a migration raises slot limits for every server', async (knex) => {
   await assert.rejects(ensureAnyApiSchema(knex, { slots: { string: 0 } }), /positive integer/)
   await assert.rejects(ensureAnyApiSchema(knex, { slots: { text: 3 } }), /Unknown AnyAPI slot pool/)
 })
+
+syncCase('many-row writes pick up changes too', async (knex) => {
+  const first = await server(knex)
+  const eager = await server(knex, { pluginOptions: { schemaCheckInterval: 0 } })
+  const lazy = await server(knex, { pluginOptions: { schemaCheckInterval: 60000 } })
+  await eager.resources.items.query()
+  await lazy.resources.items.query()
+  await first.resources.items.addKnexFields({ fields: { note } })
+  const rows = name => ({ document: { data: [{ type: 'items', attributes: { name, note: name } }] }, returning: 'full' })
+  assert.equal((await eager.resources.items.postMany(rows('Eager'))).data[0].attributes.note, 'Eager')
+  // The interval has not elapsed; the rejected write itself triggers the check and one retry.
+  assert.equal((await lazy.resources.items.postMany(rows('Lazy'))).data[0].attributes.note, 'Lazy')
+})

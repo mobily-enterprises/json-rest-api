@@ -291,7 +291,7 @@ describe(`Owned savepoint rejection (${storageMode.mode})`, () => {
   })
   after(async () => { await fixture?.close() })
 
-  for (const operation of [...operations, ...(storageMode.isAnyApi() ? [] : ['postMany', 'patchMany', 'deleteMany'].map(method => ({ name: method, method, many: true })))]) {
+  for (const operation of [...operations, ...['postMany', 'patchMany', 'deleteMany'].map(method => ({ name: method, method, many: true }))]) {
     it(`${operation.name} rejects owned savepoint completion and preserves unrelated outer work`, async () => {
       outer = await fixture.knex.transaction()
       const context = {}

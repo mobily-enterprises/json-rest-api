@@ -732,7 +732,7 @@ describe(`LocalStorage managed rollback (${storageMode.mode})`, () => {
 })
 
 // Uploads run per record; many-row writes keep file fields to single writes.
-describe(`Many-row writes and file fields (${storageMode.mode})`, { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, () => {
+describe(`Many-row writes and file fields (${storageMode.mode})`, () => {
   let fixture
   const cause = error => error?.cause ?? error
   before(async () => {

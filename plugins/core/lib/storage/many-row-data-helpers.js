@@ -1,5 +1,5 @@
-// Many-row storage for table-backed resources: scoped builders, visible-id reads,
-// multi-row inserts, by-id CASE updates, by-id deletes and row locks. Every write
+// Many-row storage: scoped builders, visible-id reads, multi-row inserts, by-id
+// CASE updates, by-id deletes and, on table storage, row locks. Every write
 // runs one statement per chunk; none of them runs through the filter hooks, so
 // MySQL never sees an UPDATE or DELETE whose subquery reads its own table.
 import { RestApiBulkInsertIdsError, RestApiBulkWriteUnsupportedError, RestApiResourceError, RestApiValidationError } from '../../../../lib/rest-api-errors.js'
@@ -28,6 +28,12 @@ export function databaseFamily (db) {
 
 // The mysql and mysql2 drivers' client flag that makes an UPDATE count the rows it matched.
 const FOUND_ROWS = 0x2
+
+// The canonical AnyAPI table's own row id, behind each row's logical id.
+const CANONICAL_ROW_ID = 'id'
+
+/** A column's value as text, for a canonical row's logical id. @param {any} db @param {string} column */
+const textOf = (db, column) => db.raw(databaseFamily(db) === 'mysql' ? 'CAST(?? AS CHAR)' : 'CAST(?? AS TEXT)', [column])
 
 /**
  * Refuses a selection write on MySQL or MariaDB whose scope joins a derived
@@ -130,17 +136,38 @@ function conflictKeyMatcher (schemaStructure, keys, keyColumns) {
 }
 
 /**
+ * The many-row helpers of table storage and, with the AnyAPI plugin's scoped
+ * query and link cleanup, of canonical AnyAPI storage, whose rows of every
+ * tenant and resource share one table.
  * @param {object} dependencies
  * @param {any} dependencies.api
  * @param {(scopeName: string) => any} dependencies.getScopeStorageAdapter
  * @param {Record<string, any>} dependencies.scopes
  * @param {any} dependencies.log
+ * @param {(request: { scopeName: string, context: any, runHooks: Function, alias?: string, purpose: string, filters?: Record<string, unknown> }) => Promise<{ query: any, alias: string }>} [dependencies.scopedQuery]
+ *   The storage's scoped query; table storage's own by default.
+ * @param {(scopeName: string, context: any, ids: Array<string | number>) => Promise<void>} [dependencies.deleteLinks]
+ *   Removes the many-to-many links of deleted rows; table storage's pivot rows by default.
  */
-export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes, log }) {
+export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes, log, scopedQuery, deleteLinks }) {
   const adapterFor = scopeName => {
     const adapter = getScopeStorageAdapter(scopeName)
     if (!adapter) throw new Error(`Storage adapter for resource '${scopeName}' not found`)
     return adapter
+  }
+  // The resource's rows: its table, or its tenant's and resource's rows of the
+  // canonical table, where the same logical id can belong to other resources.
+  const rowsOf = (storageAdapter, db) => storageAdapter.buildBaseQuery({ transaction: db })
+  // AnyAPI's canonical descriptor (tenant, resource and id columns), or null for table storage.
+  const canonicalOf = (scopeName, storageAdapter) => storageAdapter.isCanonical() ? scopes[scopeName].vars.schemaInfo.descriptor : null
+  // A new row as stored. A canonical row names its tenant and resource, and
+  // its logical id when the input gives one.
+  const newStorageRow = (scopeName, storageAdapter, attributes, context) => {
+    const row = storageAdapter.toStorageRow(attributes, { context, operation: 'post' })
+    const canonical = canonicalOf(scopeName, storageAdapter)
+    if (!canonical) return row
+    const { tenantColumn, resourceColumn } = canonical.canonical
+    return { ...row, [tenantColumn]: canonical.tenant, [resourceColumn]: canonical.resource, ...(attributes.id != null ? { [storageAdapter.getIdColumn()]: String(attributes.id) } : {}) }
   }
 
   // Tables and key columns a unique index was found to cover. A missing index is
@@ -151,15 +178,19 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
    * could match several rows, and a locking read on them would examine (and on
    * MySQL lock) every row of the table.
    */
-  const requireUniqueKeys = async ({ scopeName, db, tableName, keyColumns }) => {
-    const cacheKey = JSON.stringify([tableName, [...keyColumns].sort()])
+  const requireUniqueKeys = async ({ scopeName, db, tableName, keyColumns, canonical }) => {
+    // A canonical row's keys are its tenant's and resource's.
+    const columns = canonical ? [canonical.canonical.tenantColumn, canonical.canonical.resourceColumn, ...keyColumns] : keyColumns
+    const cacheKey = JSON.stringify([tableName, [...columns].sort()])
     if (coveredKeys.has(cacheKey)) return
     const uniqueKeys = await listKnexUniqueKeyColumns(db, tableName)
-    if (!uniqueKeys.some(columns => columns.every(column => keyColumns.includes(column)))) {
+    if (!uniqueKeys.some(unique => unique.every(column => columns.includes(column)))) {
       throw new RestApiBulkWriteUnsupportedError({
         resourceType: scopeName,
         operation: 'postMany',
-        reason: `no unique index of '${tableName}' covers the onConflict keys (${keyColumns.join(', ')}); add one, so that the keys identify one row`
+        reason: canonical
+          ? "AnyAPI storage has a unique key only on the id; use onConflict keys: ['id']"
+          : `no unique index of '${tableName}' covers the onConflict keys (${keyColumns.join(', ')}); add one, so that the keys identify one row`
       })
     }
     coveredKeys.add(cacheKey)
@@ -189,6 +220,8 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     }, () => runHooks('knexQueryFiltering'))
     return { query: state.query, alias: tableAlias }
   }
+  // The scope of a write, aliased as the table so qualified columns stay valid.
+  const writeScope = (request) => (scopedQuery || dataScopedQuery)({ ...request, alias: adapterFor(request.scopeName).getTableName() })
 
   /**
    * Identifiers the caller may touch, in id order: those of `ids` that are
@@ -201,7 +234,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const db = context.db || api.knex.instance
     const tableName = storageAdapter.getTableName()
     const idColumn = `${tableName}.${storageAdapter.getIdColumn()}`
-    const { query } = await dataScopedQuery({ scopeName, context, runHooks, purpose: queryPurpose, filters })
+    const { query } = await writeScope({ scopeName, context, runHooks, purpose: queryPurpose, filters })
     // A selection write reads its rows here first, so it is refused here whatever rows match.
     if (queryPurpose === 'bulk-write') refuseUnlockedSelection({ db, scope: query, filters, method: context.method, scopeName })
     if (ids) query.whereIn(idColumn, ids.map(id => storageAdapter.translateFilterValue('id', id)))
@@ -226,15 +259,15 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const db = context.transaction
     const tableName = storageAdapter.getTableName()
     const keyColumns = keys.map(field => storageAdapter.translateColumn(field))
-    await requireUniqueKeys({ scopeName, db, tableName, keyColumns })
+    await requireUniqueKeys({ scopeName, db, tableName, keyColumns, canonical: canonicalOf(scopeName, storageAdapter) })
     await takeSqliteWriteLock(db, tableName, storageAdapter.getIdColumn())
-    const storageRows = rows.map(attributes => storageAdapter.toStorageRow(attributes, { context, operation: 'post' }))
+    const storageRows = rows.map(attributes => newStorageRow(scopeName, storageAdapter, attributes, context))
     const matcher = conflictKeyMatcher(scopes[scopeName].vars.schemaInfo.schemaStructure, keys, keyColumns)
     const inputKeys = rows.map((attributes, index) => matcher.input(attributes, storageRows[index]))
     const wanted = new Set(inputKeys)
     const found = new Map()
     for (const part of chunk(storageRows, rowsPerStatement(db, chunkSize, keyColumns.length))) {
-      const query = db(tableName)
+      const query = rowsOf(storageAdapter, db)
         .whereIn(keyColumns, part.map(row => keyColumns.map(column => row[column] ?? null)))
         .select({ id: databaseIdentityExpression(db, storageAdapter.getIdColumn()) }, ...keyColumns)
       for (const row of await applyDatabaseReadOptions(lockRows(query, db))) {
@@ -280,8 +313,12 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
       return needIds ? ids : undefined
     }
 
-    const storageRows = rows.map(attributes => storageAdapter.toStorageRow(attributes, { context, operation: 'post' }))
+    const canonical = canonicalOf(scopeName, storageAdapter)
+    const storageRows = rows.map(attributes => newStorageRow(scopeName, storageAdapter, attributes, context))
     const keyColumns = onConflict?.keys.map(field => storageAdapter.translateColumn(field))
+    // The canonical table's only unique key is the logical id; refuse others before the INSERT does.
+    if (onConflict && canonical) await requireUniqueKeys({ scopeName, db, tableName, keyColumns, canonical })
+    const conflictColumns = canonical && keyColumns ? [canonical.canonical.tenantColumn, canonical.canonical.resourceColumn, ...keyColumns] : keyColumns
 
     // Rows with the same columns share a statement; SQLite cannot insert DEFAULT for a missing value.
     const groups = new Map()
@@ -293,52 +330,60 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     let increment
     for (const indexes of groups.values()) {
       const columns = Object.keys(storageRows[indexes[0]])
+      // A canonical row without a logical id gets its row id as one: the
+      // insert reads the generated row ids back, and one UPDATE copies them.
+      // Such a row cannot clash on the logical id.
+      const generated = Boolean(canonical) && !Object.hasOwn(storageRows[indexes[0]], idColumn)
+      const returnColumn = generated ? CANONICAL_ROW_ID : idColumn
+      const conflict = onConflict && !generated ? onConflict : undefined
       for (const part of chunk(indexes, rowsPerStatement(db, chunkSize, columns.length + 1, { insert: true }))) {
         const values = part.map(index => storageRows[index])
         let query = db(tableName).insert(values)
         // Only a clash on the conflict keys is skipped; any other unique index still fails.
-        if (onConflict) query = query.onConflict(keyColumns).ignore()
+        if (conflict) query = query.onConflict(conflictColumns).ignore()
 
-        if (!needIds) {
+        if (!needIds && !generated) {
           await query
           continue
         }
 
+        /** @type {Array<string | number | undefined>} */
+        let stored
         if (family === 'mysql' && supportsMariaDbReturning(api.knex.capabilities)) {
-          const [returned] = await db.raw('? returning ??', [query, idColumn])
-          returned.forEach((row, position) => { ids[part[position]] = row[idColumn] })
-          continue
-        }
-
-        if (family === 'mysql') {
-          if (increment === undefined) {
+          const [returned] = await db.raw('? returning ??', [query, returnColumn])
+          stored = returned.map(row => row[returnColumn])
+        } else if (family === 'mysql') {
+          const explicit = values.every(row => row[returnColumn] !== undefined && row[returnColumn] !== null)
+          if (!explicit && increment === undefined) {
             const [[setting]] = await db.raw('select @@session.auto_increment_increment as step')
             increment = Number(setting.step)
           }
-          const explicit = values.every(row => row[idColumn] !== undefined && row[idColumn] !== null)
           const [firstId] = await query
-          const stored = explicit
-            ? values.map(row => row[idColumn])
-            : await verifyMysqlInsertIds({ db, tableName, idColumn, values, firstId, increment, scopeName, schemaInfo: context.schemaInfo, storageAdapter })
-          part.forEach((index, position) => { ids[index] = stored[position] })
-          continue
+          stored = explicit
+            ? values.map(row => row[returnColumn])
+            : await verifyMysqlInsertIds({ db, tableName, idColumn: returnColumn, values, firstId, increment, scopeName, schemaInfo: context.schemaInfo, storageAdapter })
+        } else {
+          const returnColumns = { [returnColumn]: databaseIdentityExpression(db, returnColumn) }
+          for (const column of conflict ? keyColumns : []) returnColumns[`__jra_key_${column}`] = column
+          let returned = await applyDatabaseReadOptions(applyInsertReturning(query, returnColumns))
+          if (conflict) {
+            // Ignored rows return nothing, so returned rows are matched to inputs by their keys.
+            const matcher = conflictKeyMatcher(scopes[scopeName].vars.schemaInfo.schemaStructure, conflict.keys, keyColumns)
+            const byKey = new Map(returned.map(row => [matcher.stored(Object.fromEntries(keyColumns.map(column => [column, row[`__jra_key_${column}`]]))), row[returnColumn]]))
+            stored = part.map((index, position) => byKey.get(matcher.input(rows[index], values[position])))
+          } else {
+            if (family === 'sqlite' && values.some(row => row[returnColumn] === undefined || row[returnColumn] === null)) {
+              // SQLite does not promise RETURNING order; generated row ids increase in insertion order.
+              returned = [...returned].sort((left, right) => Number(left[returnColumn]) - Number(right[returnColumn]))
+            }
+            stored = returned.map(row => row[returnColumn])
+          }
         }
-
-        const returnColumns = { [idColumn]: databaseIdentityExpression(db, idColumn) }
-        for (const column of keyColumns || []) returnColumns[`__jra_key_${column}`] = column
-        let returned = await applyDatabaseReadOptions(applyInsertReturning(query, returnColumns))
-        if (onConflict) {
-          // Ignored rows return nothing, so returned rows are matched to inputs by their keys.
-          const matcher = conflictKeyMatcher(scopes[scopeName].vars.schemaInfo.schemaStructure, onConflict.keys, keyColumns)
-          const byKey = new Map(returned.map(row => [matcher.stored(Object.fromEntries(keyColumns.map(column => [column, row[`__jra_key_${column}`]]))), row[idColumn]]))
-          part.forEach((index, position) => { ids[index] = byKey.get(matcher.input(rows[index], values[position])) })
-          continue
+        if (generated) {
+          await rowsOf(storageAdapter, db).whereIn(CANONICAL_ROW_ID, stored).update({ [idColumn]: textOf(db, CANONICAL_ROW_ID) })
+          stored = stored.map(id => String(id))
         }
-        if (family === 'sqlite' && values.some(row => row[idColumn] === undefined || row[idColumn] === null)) {
-          // SQLite does not promise RETURNING order; generated row ids increase in insertion order.
-          returned = [...returned].sort((left, right) => Number(left[idColumn]) - Number(right[idColumn]))
-        }
-        returned.forEach((row, position) => { ids[part[position]] = row[idColumn] })
+        part.forEach((index, position) => { ids[index] = stored[position] })
       }
     }
     return needIds ? ids : undefined
@@ -355,11 +400,11 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const tableName = storageAdapter.getTableName()
     const idColumn = storageAdapter.getIdColumn()
     const identity = { id: databaseIdentityExpression(db, `${tableName}.${idColumn}`) }
-    const scope = scoped ? (await dataScopedQuery({ scopeName, context, runHooks, purpose: 'bulk-write', filters })).query : null
+    const scope = scoped ? (await writeScope({ scopeName, context, runHooks, purpose: 'bulk-write', filters })).query : null
     const guard = query => applyWriteConditions({ query: applyOnlyIf(query, onlyIf || {}, tableName), context, scopeName, storageAdapter, tableName })
     // The WHERE of the write, with the scope as a subquery.
     const matching = ids => {
-      const query = guard(db(tableName).whereIn(idColumn, ids))
+      const query = guard(rowsOf(storageAdapter, db).whereIn(idColumn, ids))
       return scope ? query.whereIn(idColumn, scope.clone().whereIn(`${tableName}.${idColumn}`, ids).clearSelect().select(`${tableName}.${idColumn}`)) : query
     }
     // A selection's filters must hold for a row as it is once locked, after any
@@ -373,7 +418,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
       // PostgreSQL: lock the rows first, so the statement that writes them
       // starts after any wait and reads what their holder committed.
       settle: async ids => {
-        if (selection && family === 'pg') await lockRows(db(tableName).whereIn(idColumn, ids).orderBy(idColumn), db).select(idColumn)
+        if (selection && family === 'pg') await lockRows(rowsOf(storageAdapter, db).whereIn(idColumn, ids).orderBy(idColumn), db).select(idColumn)
       },
       // The ids that still match, locked. MySQL and MariaDB check a selection's
       // scope and filters in the locking read's own query block, on the
@@ -401,7 +446,6 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
   const dataUpdateByIds = async ({ scopeName, context, runHooks, updates, onlyIf, chunkSize, scoped = false, filters }) => {
     const storageAdapter = adapterFor(scopeName)
     const db = context.transaction
-    const tableName = storageAdapter.getTableName()
     const idColumn = storageAdapter.getIdColumn()
     const family = databaseFamily(db)
     const lockVersionColumn = context.schemaInfo.lockVersionField ? storageAdapter.translateColumn(context.schemaInfo.lockVersionField) : null
@@ -435,7 +479,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
       const writes = Object.keys(set).length > 0
       const ids = part.map(update => storageAdapter.translateFilterValue('id', update.id))
       if (!guarded) {
-        if (writes) await db(tableName).whereIn(idColumn, ids).update(set)
+        if (writes) await rowsOf(storageAdapter, db).whereIn(idColumn, ids).update(set)
         changed.push(...part.map(update => update.id))
       } else if (family === 'mysql' || !writes) {
         // MySQL cannot return updated rows. One row's UPDATE answers from its
@@ -448,7 +492,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
         // Otherwise lock the rows that match, then update exactly those.
         await settle(ids)
         const matched = await locked(ids)
-        if (matched.length && writes) await db(tableName).whereIn(idColumn, matched).update(set)
+        if (matched.length && writes) await rowsOf(storageAdapter, db).whereIn(idColumn, matched).update(set)
         changed.push(...matched)
       } else {
         await settle(ids)
@@ -460,7 +504,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
   }
 
   /**
-   * Delete visible rows by id, one DELETE per chunk, then their pivot rows.
+   * Delete visible rows by id, one DELETE per chunk, then their many-to-many links.
    * With `scoped`, each DELETE carries the caller's scope and `filters` (see
    * dataUpdateByIds).
    * Returns the identifiers the statements deleted.
@@ -471,13 +515,14 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const storageAdapter = adapterFor(scopeName)
     const db = context.transaction
     const family = databaseFamily(db)
-    const tableName = storageAdapter.getTableName()
     const idColumn = storageAdapter.getIdColumn()
     const identity = { id: databaseIdentityExpression(db, idColumn) }
     const { matching, settle, locked } = await writeMatcher({ scopeName, context, runHooks, scoped, filters })
     const guarded = scoped || hasWriteConditions(context, scopeName)
     const deleted = []
-    for (const part of chunk(ids, rowsPerStatement(db, chunkSize, scoped ? 2 : 1))) {
+    // A scoped DELETE binds each id twice, and so does AnyAPI's link cleanup.
+    const bindings = scoped || storageAdapter.isCanonical() ? 2 : 1
+    for (const part of chunk(ids, rowsPerStatement(db, chunkSize, bindings))) {
       let values = part.map(id => storageAdapter.translateFilterValue('id', id))
       if (guarded && family === 'pg') {
         // The scope and the caller's ownership narrow the DELETE, which returns the rows it removed.
@@ -491,12 +536,12 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
       } else if (guarded) {
         // MySQL cannot return deleted rows: lock the rows that still match, then delete exactly those.
         values = await locked(values)
-        if (values.length) await db(tableName).whereIn(idColumn, values).delete()
+        if (values.length) await rowsOf(storageAdapter, db).whereIn(idColumn, values).delete()
       } else {
-        await db(tableName).whereIn(idColumn, values).delete()
+        await rowsOf(storageAdapter, db).whereIn(idColumn, values).delete()
       }
       if (!values.length) continue
-      await deletePivotReferences(api, scopeName, context, values)
+      await (deleteLinks ? deleteLinks(scopeName, context, values) : deletePivotReferences(api, scopeName, context, values))
       deleted.push(...values)
     }
     return deleted
@@ -713,7 +758,7 @@ async function verifyMysqlInsertIds ({ db, tableName, idColumn, values, firstId,
   const start = Number(firstId)
   const expected = values.map((_row, position) => start + position * increment)
   const comparable = comparableColumns(values, schemaInfo, storageAdapter)
-  const rows = await applyDatabaseReadOptions(db(tableName).whereIn(idColumn, expected).orderBy(idColumn)
+  const rows = await applyDatabaseReadOptions(storageAdapter.buildBaseQuery({ transaction: db }).whereIn(idColumn, expected).orderBy(idColumn)
     .select({ __jra_id: idColumn }, ...comparable))
   const verified = rows.length === values.length && rows.every((row, position) =>
     Number(row.__jra_id) === expected[position] && comparable.every(column => String(row[column]) === String(values[position][column])))

@@ -12,7 +12,6 @@ import {
 } from './helpers/test-utils.js'
 import { createWebSocketApi, closeWebSocketApi } from './fixtures/api-configs.js'
 import { waitForSocketEvent, installSocketBarrier, drainSocketEvents } from './helpers/socketio.js'
-import { storageMode } from './helpers/storage-mode.js'
 
 // Create JWT token using jose
 async function createToken (payload = {}, secret = 'test-secret-key') {
@@ -728,7 +727,7 @@ describe('WebSocket/Socket.IO Plugin', () => {
     })
   })
 
-  describe('Many-row notifications', { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, () => {
+  describe('Many-row notifications', () => {
     it('notifies once per changed record that matched before or after the write', async () => {
       const token = await createToken({ userId: 'test-user', role: 'user' }, 'test-secret-key')
       const socket = ioClient(`http://localhost:${server.address().port}`, { path: '/api/socket.io', auth: { token } })

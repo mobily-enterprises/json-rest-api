@@ -4,7 +4,7 @@ import { prepareReferenceSortColumns } from '../querying/knex-query-helpers.js'
 import { applySortDescriptorOrder, buildEffectiveSortList, parseSortEntry, resolveSortField } from '../querying/query-field-sort-helpers.js'
 import { normalizeId, resolveFieldInfo } from '../anyapi/utils/descriptor-helpers.js'
 import { decorateResourceLinks, getAllowedQueryFieldNames } from '../anyapi/canonical-relationship-reader.js'
-import { applyQueryConstraint } from '../querying/query-constraint.js'
+import { applyQueryConstraint, queryConstraint } from '../querying/query-constraint.js'
 import { runAggregateQuery } from '../querying/aggregate-query.js'
 import { calculatePaginationMeta, generatePaginationLinks, generateCursorPaginationLinks, buildCursorMeta, applyPaginationToQuery } from '../querying/knex-pagination-helpers.js'
 import { getUrlPrefix, buildJsonApiLink } from '../querying/url-helpers.js'
@@ -16,6 +16,7 @@ import { applyInsertReturning } from '../querying-writing/database-capabilities.
 import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
 import { deleteFoundRow, foundRow, lockFoundRow, updateFoundRow } from './single-row-writes.js'
 import { whereInIdentifiers } from '../querying/identifier-query.js'
+import { databaseFamily } from './many-row-data-helpers.js'
 
 /** @param {StorageRow} row @param {CanonicalDescriptor} descriptor */
 function requireCanonicalResourceId (row, descriptor) {
@@ -246,7 +247,7 @@ export function createCanonicalDataHelpers ({
     const idColumn = getCanonicalResourceIdColumn(descriptor)
     await linkStore.invalidateDeletedLinkTargets(scopeName, context, () => lockFoundRow(row, { scopeName, id, idColumn }))
     const deleted = await deleteFoundRow(row, { scopeName, id })
-    await linkStore.deleteResourceLinks({ descriptor, scopeName, id, db: context.db })
+    await linkStore.deleteResourceLinks({ descriptor, scopeName, ids: [id], db: context.db })
 
     return deleted
   }
@@ -262,7 +263,8 @@ export function createCanonicalDataHelpers ({
     runHooks,
     applyQueryFilters,
     filters = context.queryParams?.filters,
-    queryPurpose = 'single'
+    queryPurpose = 'single',
+    locked = false
   }) {
     const storageAdapter = getScopeStorageAdapter(scopeName)
     if (!storageAdapter) throw new Error(`Storage adapter for resource '${scopeName}' not found`)
@@ -328,6 +330,15 @@ export function createCanonicalDataHelpers ({
       }
       if (scope) decorateResourceLinks({ resource: minimal, scope, scopeName, context })
       return minimal
+    }
+    if (ids !== undefined && locked && databaseFamily(context.db) === 'mysql') {
+      // Rows this transaction has locked are read with a locking read, as the
+      // ordinary dataGetMinimal explains: InnoDB's plain reads keep the
+      // transaction's snapshot.
+      /** @type {StorageRow[]} */
+      const rows = await applyDatabaseReadOptions(query.clearSelect().select(`${canonical.tableName}.*`).forShare())
+      // A policy join can repeat a row.
+      return [...new Map(rows.map(toMinimal).map(record => [String(record.id), record])).values()]
     }
     if (ids !== undefined) {
       // Filtering owns predicates; the id list owns its identity projection.
@@ -529,6 +540,9 @@ export function createCanonicalDataHelpers ({
       storageAdapter,
     })
 
+    // Rows this transaction has locked, read as its locking reads see them (see dataGetMinimal).
+    const constraint = context[queryConstraint]
+    if (constraint?.scopeName === scopeName && constraint.locked && databaseFamily(db) === 'mysql') queryBuilder.forShare()
     /** @type {StorageRow[]} */
     let rows = await applyDatabaseReadOptions(queryBuilder)
     let cursorRecords = null
@@ -726,9 +740,9 @@ export function createCanonicalDataHelpers ({
   }
 
   /**
-   * The canonical rows of one resource with ownership and row policy applied.
-   * Many-row writes and row locks are table-storage features; AnyAPI resources
-   * get the read-only builder only. Resolves to `{ query, alias }`.
+   * The canonical rows of one resource with ownership and row policy applied:
+   * the read-only builder, and the scope of many-row writes. Row locks are a
+   * table-storage feature. Resolves to `{ query, alias }`.
    * @param {{ scopeName: string, context: DataReadContext, runHooks: (name: 'knexQueryFiltering') => unknown, alias?: string, purpose: string, filters?: Record<string, unknown> }} request
    */
   const dataScopedQuery = async ({ scopeName, context, runHooks, alias, purpose, filters }) => {

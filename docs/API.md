@@ -1266,8 +1266,10 @@ jobs. They keep the caller's ownership filters (autofilter) and row policies.
 The guides have the details:
 [many-row writes](GUIDE/27-many-row-writes.md) and
 [scoped reads, locks and system work](GUIDE/34-scoped-reads-and-locks.md).
-Many-row writes and locks need table storage (`RestApiKnexPlugin`); AnyAPI
-resources refuse them with `RestApiBulkWriteUnsupportedError`. `queryAll` and
+Many-row writes work on table and AnyAPI storage; on AnyAPI, `onConflict` takes
+only `keys: ['id']`. Row locks and claims need table storage
+(`RestApiKnexPlugin`); AnyAPI resources refuse them with
+`RestApiBulkWriteUnsupportedError`. `queryAll` and
 `scopedQuery` work on both storages; on AnyAPI the scoped builder reads the
 canonical rows, whose fields live in storage slots.
 
@@ -1333,12 +1335,12 @@ relationship) and the `lockVersionField`, and accept real `knex.raw()` values
 for stored, non-relationship fields. The UPDATE, DELETE and lock statements
 repeat the caller's ownership conditions, so a row that moved to another owner
 after the visibility read is left alone and counts as missing. Deletes remove
-the records' pivot rows. Batch hooks run once per call:
+the records' many-to-many links (pivot rows, or AnyAPI's links). Batch hooks run once per call:
 `beforeProcessingPostMany`, `beforeDataCallPostMany`, `afterDataCallPostMany`,
 the `PatchMany` trio and `beforeDataCallDeleteMany` / `afterDataCallDeleteMany`.
 
-`RestApiBulkWriteUnsupportedError` (422) is thrown before writing for AnyAPI
-storage, versioned resources (and those whose writes advance a version),
+`RestApiBulkWriteUnsupportedError` (422) is thrown before writing for
+versioned resources (and those whose writes advance a version),
 per-record write hooks not registered with `{ batch: true }`, rows that set
 many-to-many or reverse relationships, file fields, or positions.
 `BulkOperationsPlugin` exposes `postMany`, `patchMany` and `deleteMany` as

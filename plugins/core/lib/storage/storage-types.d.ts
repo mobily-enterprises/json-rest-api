@@ -529,7 +529,7 @@ export interface CanonicalDataDependencies {
   getDescriptor(scopeName: string): CanonicalDescriptor
   linkStore: {
     invalidateDeletedLinkTargets(scopeName: string, context: DataIdentityContext, lockRow: () => Promise<void>): Promise<void>
-    deleteResourceLinks(request: { descriptor: CanonicalDescriptor, scopeName: string, id: string | number, db: StorageDatabase }): Promise<void>
+    deleteResourceLinks(request: { descriptor: CanonicalDescriptor, scopeName: string, ids: Array<string | number>, db: StorageDatabase }): Promise<void>
   }
   buildIncludes(request: { parentResources: DataResource[], descriptor: CanonicalDescriptor, context: DataReadContext }): Promise<DataResource[]>
   attachReverseRelationships(request: { resources: DataResource[], descriptor: CanonicalDescriptor, context: DataReadContext }): Promise<void>

@@ -9,9 +9,7 @@ import { storageMode } from './helpers/storage-mode.js'
 
 const tables = { pivots: 'row_policy_project_tasks', tasks: 'row_policy_tasks', projects: 'row_policy_projects', broken: 'row_policy_broken' }
 const resource = (title, id) => ({ type: 'policy_tasks', ...(id === undefined ? {} : { id }), attributes: { title, access_group: 'group-a' } })
-const tableOnly = storageMode.isAnyApi() && 'many-row writes need table storage'
-
-describe(`Bulk zero ID (${storageMode.mode})`, { skip: tableOnly }, () => {
+describe(`Bulk zero ID (${storageMode.mode})`, () => {
   let fixture
   before(async () => {
     fixture = await createConformanceFixture({ createApi: createIdConformanceApi, tables: { memberships: 'conformance_memberships', items: 'conformance_items', groups: 'conformance_groups' } })
@@ -84,7 +82,7 @@ for (const connector of ['express', 'fastify']) {
           ? { data: [resource('Updated', seeded.task.id)] }
           : { data: [{ type: 'policy_tasks', id: seeded.task.id }] }
 
-      it(`forwards authenticated user and workspace for ${method}`, { skip: tableOnly }, async () => {
+      it(`forwards authenticated user and workspace for ${method}`, async () => {
         const response = await send(method, bodyFor())
         assert.equal(response.status, method === 'POST' ? 201 : 200, JSON.stringify(response.body))
         assert.equal(response.body.data.length, 1)
@@ -93,21 +91,14 @@ for (const connector of ['express', 'fastify']) {
         assert.deepEqual(seen, [{ userId: 'viewer', index: 0, workspace: 'workspace-a' }])
       })
 
-      it(`enforces write permission for ${method} and keeps the database unchanged`, { skip: tableOnly }, async () => {
+      it(`enforces write permission for ${method} and keeps the database unchanged`, async () => {
         const response = await send(method, bodyFor(), '', true)
         assert.equal(response.status, 403, JSON.stringify(response.body))
         assert.deepEqual(await titles(), original)
       })
-
-      it(`answers ${method} with a refusal on AnyAPI storage`, { skip: !storageMode.isAnyApi() && 'AnyAPI only' }, async () => {
-        const response = await send(method, bodyFor())
-        assert.equal(response.status, 422, JSON.stringify(response.body))
-        assert.equal(response.body.errors[0].code, 'REST_API_BULK_WRITE_UNSUPPORTED')
-        assert.deepEqual(await titles(), original)
-      })
     }
 
-    it('writes many rows per request and keeps hidden rows out of every change', { skip: tableOnly }, async () => {
+    it('writes many rows per request and keeps hidden rows out of every change', async () => {
       const created = await send('POST', { data: ['One', 'Two', 'Three'].map(title => resource(title)) })
       assert.equal(created.status, 201, JSON.stringify(created.body))
       const ids = created.body.data.map(row => row.id)

@@ -124,7 +124,7 @@ async function finishLockedRead ({ document, context, scope, scopes, scopeName, 
 async function setupLockRead ({ params, context, vars, helpers, scopes, scopeName }, operation, storageHelper) {
   requireLockTransaction({ transaction: params.transaction, scopeName, operation })
   if (typeof helpers[storageHelper] !== 'function') {
-    throw new RestApiBulkWriteUnsupportedError({ resourceType: scopeName, operation, reason: 'its storage plugin has no row locks (AnyAPI storage takes single writes)' })
+    throw new RestApiBulkWriteUnsupportedError({ resourceType: scopeName, operation, reason: 'its storage plugin has no row locks (AnyAPI storage has none)' })
   }
   context.method = operation
   context.scopeName = scopeName

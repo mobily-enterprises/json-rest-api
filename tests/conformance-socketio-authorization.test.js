@@ -403,7 +403,7 @@ for (const transport of ['websocket', 'polling']) {
       ])
     })
 
-    it('notifies only committed visible many-row writes', { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, async () => {
+    it('notifies only committed visible many-row writes', async () => {
       const socket = await connect()
       const events = await subscribe(socket)
       const result = await api.resources.policy_projects.postMany({
@@ -418,7 +418,7 @@ for (const transport of ['websocket', 'polling']) {
       assert.deepEqual(events.map(event => event.id), [result.data[0].id])
     })
 
-    it('discards notifications for rolled-back many-row writes', { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, async () => {
+    it('discards notifications for rolled-back many-row writes', async () => {
       const socket = await connect()
       const events = await subscribe(socket)
       await assert.rejects(api.resources.policy_projects.postMany({
@@ -431,7 +431,7 @@ for (const transport of ['websocket', 'polling']) {
     })
 
     for (const method of ['postMany', 'patchMany', 'deleteMany']) {
-      it(`${method} notifies each row the subscriber can see`, { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, async () => {
+      it(`${method} notifies each row the subscriber can see`, async () => {
         const groups = ['group-a', 'group-a', 'group-b', 'group-a']
         const ids = []
         if (method === 'postMany') ids.push('90', '91', '92', '93')

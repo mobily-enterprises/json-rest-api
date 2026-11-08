@@ -114,7 +114,7 @@ export async function deleteWhereMethod (args) {
   try {
     setup(args, 'deleteWhere')
     if (typeof helpers.dataVisibleIds !== 'function') {
-      throw unsupported(scopeName, 'deleteWhere', 'its storage plugin has no many-row support (AnyAPI storage takes single writes)')
+      throw unsupported(scopeName, 'deleteWhere', 'its storage plugin has no many-row support')
     }
     const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
     requireWhereScope({ filters, all: params.all, missing: params.missing, operation: 'deleteWhere' })

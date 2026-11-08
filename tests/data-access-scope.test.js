@@ -95,17 +95,19 @@ describe(`System context, shared rows, scopedQuery and queryAll (${storageMode.m
     assert.equal(shared.workspace_id, null)
   })
 
-  it('keeps shared rows out of write and lock scopes', { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, async () => {
+  it('keeps shared rows out of write and lock scopes', async () => {
     await fixture.reset()
     await fixture.seed('da_labels', [
       { id: '1', name: 'shared', workspace_id: null },
       { id: '2', name: 'mine', workspace_id: 'ws-a' }
     ])
     const labels = fixture.api.resources.da_labels
+    // On AnyAPI the record id is the canonical row's logical id.
+    const id = fixture.api.knex.helpers.getStorageAdapter('da_labels').getIdColumn()
     const report = await labels.scopedQuery({}, workspaceA())
-    assert.deepEqual((await report.query.select('id').orderBy('id')).map(row => String(row.id)), ['1', '2'])
+    assert.deepEqual((await report.query.select({ id }).orderBy(id)).map(row => String(row.id)), ['1', '2'])
     const writes = await labels.scopedQuery({ purpose: 'bulk-write' }, workspaceA())
-    assert.deepEqual((await writes.query.select('id')).map(row => String(row.id)), ['2'])
+    assert.deepEqual((await writes.query.select({ id })).map(row => String(row.id)), ['2'])
 
     await assert.rejects(
       labels.patchMany({ data: [{ id: '1', name: 'x' }, { id: '2', name: 'y' }] }, workspaceA()),

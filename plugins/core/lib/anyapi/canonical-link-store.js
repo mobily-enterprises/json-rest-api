@@ -493,9 +493,12 @@ export function createCanonicalLinkStore ({ api, getDescriptor, getScopeStorageA
     return rows.map(row => ({ type: relInfo.target, id: normalizeId(row.childId) }))
   }
 
-  const deleteResourceLinks = async ({ descriptor, scopeName, id, db }) => {
+  // The links of deleted records, in one statement.
+  const deleteResourceLinks = async ({ descriptor, scopeName, ids: deletedIds, db }) => {
+    const ids = deletedIds.map(id => String(id))
     await db(LINKS_TABLE).where('tenant_id', descriptor.tenant).where(query => {
-      query.where({ left_resource: scopeName, left_id: id }).orWhere({ right_resource: scopeName, right_id: id })
+      query.where(side => side.where('left_resource', scopeName).whereIn('left_id', ids))
+        .orWhere(side => side.where('right_resource', scopeName).whereIn('right_id', ids))
     }).delete()
   }
 

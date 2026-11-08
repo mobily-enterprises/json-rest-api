@@ -80,7 +80,7 @@ describe(`Independent input and output (${storageMode.mode})`, () => {
 
   for (const format of ['plain', 'jsonapi']) {
     for (const inputKey of ['data', 'document']) {
-      it(`many-row writes accept ${inputKey} with ${format} output`, { skip: storageMode.isAnyApi() && 'many-row writes need table storage' }, async () => {
+      it(`many-row writes accept ${inputKey} with ${format} output`, async () => {
         const records = [{ name: 'First' }, { name: 'Second' }]
         const input = inputKey === 'data' ? records : { data: records.map(attributes => documentFor(attributes).data) }
         const created = await items.postMany({ [inputKey]: input, format, returning: 'full' })

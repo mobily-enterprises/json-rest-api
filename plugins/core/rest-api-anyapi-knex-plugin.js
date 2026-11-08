@@ -1,4 +1,5 @@
 import { createCanonicalDataHelpers } from './lib/storage/canonical-data-helpers.js'
+import { createManyRowDataHelpers } from './lib/storage/many-row-data-helpers.js'
 import { createCanonicalLinkStore } from './lib/anyapi/canonical-link-store.js'
 import { createCanonicalRelationshipReader } from './lib/anyapi/canonical-relationship-reader.js'
 import { createKnexTransaction } from '../../lib/knex-transaction.js'
@@ -18,7 +19,11 @@ import { applyDatabaseReadOptions, normalizeStoredFieldValue } from './lib/query
 const DEFAULT_TENANT = 'default'
 const MIGRATION_BATCH_SIZE = 500
 // Methods that read a published schema; schema checks wrap these.
-const REQUEST_METHODS = ['query', 'aggregate', 'get', 'post', 'put', 'patch', 'delete', 'getRelated', 'getRelationship', 'postRelationship', 'patchRelationship', 'deleteRelationship']
+const REQUEST_METHODS = [
+  'query', 'aggregate', 'get', 'post', 'put', 'patch', 'delete',
+  'postMany', 'patchMany', 'patchWhereIds', 'patchWhere', 'deleteMany', 'deleteWhere',
+  'getRelated', 'getRelationship', 'postRelationship', 'patchRelationship', 'deleteRelationship'
+]
 
 const optionsSignature = options => JSON.stringify([
   Object.keys(options.schema || {}).sort(),
@@ -298,7 +303,7 @@ export const RestApiAnyapiKnexPlugin = {
       await basicFiltersHook(hookParams, queryHookDependencies)
     }
 
-    Object.assign(helpers, createCanonicalDataHelpers({
+    const canonicalHelpers = createCanonicalDataHelpers({
       api,
       knex,
       getScopeStorageAdapter,
@@ -308,7 +313,19 @@ export const RestApiAnyapiKnexPlugin = {
       attachReverseRelationships,
       attachManyToManyRelationships,
       applyBuiltInAnyApiQueryFilters
-    }))
+    })
+    Object.assign(helpers, canonicalHelpers)
+    // Many-row writes run table storage's statements on the resource's canonical
+    // rows. Row locks and claims stay table-storage features.
+    const { dataVisibleIds, dataIdsByKeys, dataInsertMany, dataUpdateByIds, dataDeleteByIds } = createManyRowDataHelpers({
+      api,
+      scopes,
+      log,
+      getScopeStorageAdapter,
+      scopedQuery: canonicalHelpers.dataScopedQuery,
+      deleteLinks: (scopeName, context, ids) => linkStore.deleteResourceLinks({ descriptor: getDescriptor(scopeName), scopeName, ids, db: context.transaction })
+    })
+    Object.assign(helpers, { dataVisibleIds, dataIdsByKeys, dataInsertMany, dataUpdateByIds, dataDeleteByIds })
 
     addHook('resource:added', 'anyapi-register-resource', {}, async ({ context }) => {
       const { scopeName, scopeOptions = {} } = context

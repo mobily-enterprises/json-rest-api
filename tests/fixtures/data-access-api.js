@@ -156,8 +156,25 @@ export async function createDataAccessFixture (options = {}) {
       client: knex.client.config.client,
       seed,
       reset: () => cleanTables(knex, Object.values(DATA_ACCESS_TABLES).reverse()),
+      // A table's rows by id. On AnyAPI: a resource's canonical rows with field
+      // names, or a many-to-many link table's links with its key names.
       async rows (table) {
-        return knex(table).orderBy('id')
+        const scopeName = storage === 'anyapi' && storageMode.getResourceForTable(knex, table)
+        const link = storage === 'anyapi' && storageMode.getLinkInfo(knex, table)
+        if (!scopeName && !link) return knex(table).orderBy('id')
+        let rows
+        if (link) {
+          const { foreignKey, otherKey } = api.resources[link.ownerResource].vars.schemaInfo.schemaRelationships[link.relationshipName]
+          const relationship = link.relationshipKey || `${link.tenantId}:${link.ownerResource}:${link.relationshipName}`
+          rows = await knex('any_links').where({ tenant_id: link.tenantId, relationship })
+            .select({ id: 'id', [foreignKey]: 'left_id', [otherKey]: 'right_id' })
+        } else {
+          const adapter = api.knex.helpers.getStorageAdapter(scopeName)
+          const { fields } = api.resources[scopeName].vars.schemaInfo.descriptor
+          rows = await adapter.buildBaseQuery()
+            .select({ id: adapter.getIdColumn(), ...Object.fromEntries(Object.entries(fields).map(([field, { slot }]) => [field, slot])) })
+        }
+        return rows.sort((left, right) => Number(left.id) - Number(right.id) || String(left.id).localeCompare(String(right.id)))
       },
       // Statements the work runs, from the driver's query events.
       async measure (work) {

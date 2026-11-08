@@ -6,7 +6,7 @@ chapter_label: "27"
 
 # 27. Many-row writes
 
-Every table-storage resource has six methods that write many rows at once:
+Every resource, on table or AnyAPI storage, has six methods that write many rows at once:
 
 | Method | Writes |
 | --- | --- |
@@ -28,8 +28,9 @@ jobs; use the single-record methods when each write needs its own hooks.
 
 Insert the following four JavaScript blocks into the
 [starting script](03-running-example.md), after installing table storage and
-before declaring other resources, on a fresh database. Many-row writes need
-table storage (`RestApiKnexPlugin`); AnyAPI storage refuses them.
+before declaring other resources, on a fresh database. Many-row writes work on
+table storage (`RestApiKnexPlugin`) and on AnyAPI storage, with the
+[AnyAPI differences](#anyapi-storage) below.
 
 ```javascript
 await api.addResource('books', {
@@ -135,6 +136,9 @@ await api.resources.books.patchWhereIds({
   ids: ['1', '2'], data: { stock: knex.raw('?? + 1', ['stock']) }
 })
 ```
+
+A raw expression names stored columns. On AnyAPI storage those are the
+field's slot, `api.knex.helpers.getStorageAdapter('books').translateColumn('stock')`.
 
 Only a real Knex raw value counts. An object that merely carries an
 `isRawInstance` flag, as JSON input can, is refused with a validation error, so
@@ -413,7 +417,6 @@ apply to every row. Some features stay single-row. The methods throw
 `RestApiBulkWriteUnsupportedError` (code `REST_API_BULK_WRITE_UNSUPPORTED`,
 HTTP 422) before writing when:
 
-- the resource uses AnyAPI storage;
 - the resource has a `versionField`, or its writes advance another resource's
   version (use single writes with `expectedVersion`, or a `lockVersionField`
   with `onlyIf`);
@@ -423,6 +426,26 @@ HTTP 422) before writing when:
 - rows set file fields (`FileHandlingPlugin`), directly or with raw values;
 - rows create positioned records or move them (`PositioningPlugin`), directly
   or with raw values.
+
+## AnyAPI storage
+
+On AnyAPI storage the methods write the resource's rows of the canonical table,
+which holds every tenant's and resource's records: each statement is limited to
+the resource's tenant and resource, so a record of another resource or tenant
+with the same id is never touched. Statement counts stay flat as on table
+storage. The differences:
+
+- A created record without an id takes its canonical row's id as its id. Each
+  chunk of such rows runs its INSERT and then one UPDATE that sets those ids
+  (MySQL reads the ids back between them, as on table storage). Rows with ids
+  are inserted in one statement per chunk.
+- The canonical table's only unique key is the record id, so `onConflict` takes
+  `keys: ['id']` on a resource without ownership fields or a row policy, and
+  refuses other keys with `RestApiBulkWriteUnsupportedError`.
+- A delete also removes the records' many-to-many links, one statement per chunk.
+- A raw expression names the field's slot column (see Input).
+- Row locks and claims ([chapter 34](34-scoped-reads-and-locks.md)) still need
+  table storage.
 
 ## HTTP routes
 
