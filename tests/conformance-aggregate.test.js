@@ -5,11 +5,13 @@ import { createAggregateApi } from './fixtures/api-configs.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { RestApiResourceError, RestApiValidationError } from '../lib/rest-api-errors.js'
 import { databaseClient } from './helpers/test-database.js'
+import { createSystemContext } from '../lib/system-context.js'
 
 const tables = { customers: 'aggregate_customers', sales: 'aggregate_sales' }
 const customers = [
   { name: 'Acme', workspace: 'w1' },
-  { name: 'Globex', workspace: 'w2' }
+  { name: 'Globex', workspace: 'w2' },
+  { name: 'Initech', workspace: 'w2' }
 ]
 const sales = [
   { salesperson: 'Ann', region: 'north', amount: 100.5, units: 2, closed: true, closedOn: '2026-01-01', closedAt: '2026-01-01T10:00:00.000Z', loggedAt: '2026-01-01T10:00:00.250Z', workspace: 'w1', customer: 1, cents: 150 },
@@ -150,6 +152,26 @@ describe(`Resource aggregates (${storageMode.mode})`, () => {
     assert.deepEqual(result.data, [{ rows: 2 }])
     const all = await fixture.api.resources.customers.aggregate({ measures: { rows: { count: '*' } }, queryParams: { filters: { saleRegion: 'south' } } })
     assert.deepEqual(all.data, [{ rows: 2 }])
+  })
+
+  it('groups by a hidden ownership field only in a system context', async () => {
+    const customerAggregate = (params, context) => fixture.api.resources.customers.aggregate(params, context)
+    const system = createSystemContext('find the workspaces with customers')
+    const owners = await customerAggregate({ groupBy: ['workspace'], measures: { rows: { count: '*' } } }, system)
+    assert.deepEqual(owners.data, [{ workspace: 'w1', rows: 1 }, { workspace: 'w2', rows: 2 }])
+    const distinct = await customerAggregate({ measures: { owners: { countDistinct: 'workspace' } } }, createSystemContext('count the workspaces'))
+    assert.deepEqual(distinct.data, [{ owners: 2 }])
+
+    // A scoped caller, and one whose optional owner filter does not resolve, may not.
+    const refused = error => cause(error) instanceof RestApiValidationError && /'workspace' is not an attribute of 'customers' that can be aggregated/.test(cause(error).message)
+    for (const context of [{ workspace: 'w1' }, {}]) {
+      await assert.rejects(customerAggregate({ groupBy: ['workspace'], measures: { rows: { count: '*' } } }, context), refused)
+      await assert.rejects(customerAggregate({ measures: { owners: { countDistinct: 'workspace' } } }, context), refused)
+    }
+    // Other uses of the field, and other hidden fields, stay refused in a system context.
+    await assert.rejects(customerAggregate({ measures: { first: { min: 'workspace' } } }, createSystemContext('min')), refused)
+    await assert.rejects(aggregate({ groupBy: ['secret'], measures: { rows: { count: '*' } } }, createSystemContext('secret')),
+      error => cause(error) instanceof RestApiValidationError && /'secret' is not an attribute/.test(cause(error).message))
   })
 
   it('sees uncommitted rows in a caller transaction', async () => {

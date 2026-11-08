@@ -104,7 +104,8 @@ export async function createAggregateApi (knex, { storage = storageMode.mode } =
     presets: { workspace: { filters: [{ field: 'workspace', resolver: 'workspace', required: false }] } }
   })
   await api.addResource('customers', {
-    schema: { id: { type: 'id' }, name: { type: 'string', required: true }, workspace: { type: 'string', nullable: true } },
+    // A hidden ownership field, as an application hides its owner columns.
+    schema: { id: { type: 'id' }, name: { type: 'string', required: true }, workspace: { type: 'string', nullable: true, hidden: true } },
     relationships: { sales: { type: 'hasMany', target: 'sales', foreignKey: 'customerId' } },
     searchSchema: { saleRegion: { type: 'string', actualField: 'sales.region' } },
     autofilter: 'workspace',

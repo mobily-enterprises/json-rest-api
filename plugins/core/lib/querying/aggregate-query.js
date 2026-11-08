@@ -44,9 +44,13 @@ const positiveInteger = (value, field) => {
  * Validate an aggregate request against a resource's compiled schema.
  * Only stored scalar fields whose stored values are their public values qualify:
  * getters and storage serializers would make SQL group or sum other values than clients see.
- * @param {{ params: Record<string, any>, schemaInfo: Record<string, any>, scopeName: string, defaultLimit: number, maxLimit: number }} request
+ * A system context may also group by, and count distinct, a hidden ownership
+ * field, so a job can find which owners have rows. A scoped caller would see
+ * only its own owner, and one whose optional owner filter did not resolve
+ * would see every owner's hidden value, so neither may.
+ * @param {{ params: Record<string, any>, schemaInfo: Record<string, any>, scopeName: string, defaultLimit: number, maxLimit: number, system?: boolean }} request
  */
-export function compileAggregateRequest ({ params, schemaInfo, scopeName, defaultLimit, maxLimit }) {
+export function compileAggregateRequest ({ params, schemaInfo, scopeName, defaultLimit, maxLimit, system = false }) {
   if (!isPlainObject(params)) invalid('params', 'aggregate requires a parameter object')
   for (const key of Object.keys(params)) {
     if (!PARAMS.has(key)) invalid(key, `Unknown aggregate parameter '${key}'`)
@@ -60,9 +64,11 @@ export function compileAggregateRequest ({ params, schemaInfo, scopeName, defaul
   const fields = schemaInfo.schemaStructure || {}
   // A storage serializer changes what SQL sees; date and dateTime fields may still be
   // bucketed and take min/max, as SQL orders and truncates their stored temporal values.
-  const fieldDefinition = (name, parameter, { serializedTemporal = false } = {}) => {
+  const owners = new Set(system ? schemaInfo.ownershipFields || [] : [])
+  const fieldDefinition = (name, parameter, { serializedTemporal = false, owner = false } = {}) => {
     const definition = typeof name === 'string' && Object.hasOwn(fields, name) ? fields[name] : null
-    if (!definition || name === 'id' || name === schemaInfo.idProperty || definition.virtual === true || definition.hidden === true) {
+    const hidden = definition?.hidden === true && !(owner && owners.has(name))
+    if (!definition || name === 'id' || name === schemaInfo.idProperty || definition.virtual === true || hidden) {
       invalid(parameter, `'${name}' is not an attribute of '${scopeName}' that can be aggregated`)
     }
     const serialized = Boolean(definition.storage?.serialize) && !(serializedTemporal && TEMPORAL_TYPES.has(definition.type))
@@ -77,7 +83,7 @@ export function compileAggregateRequest ({ params, schemaInfo, scopeName, defaul
   const groups = groupBy.map((entry, index) => {
     const parameter = `groupBy.${index}`
     if (isPlainObject(entry)) return compileBucket(entry, { parameter, alias: `g${index}`, fieldDefinition, names })
-    const definition = fieldDefinition(entry, parameter)
+    const definition = fieldDefinition(entry, parameter, { owner: true })
     if (!SCALAR_TYPES.has(definition.type)) invalid(parameter, `Field '${entry}' has type '${definition.type}' and cannot be grouped`)
     if (names.has(entry)) invalid('groupBy', 'groupBy lists a field twice')
     names.add(entry)
@@ -101,7 +107,7 @@ export function compileAggregateRequest ({ params, schemaInfo, scopeName, defaul
       if (fn !== 'count') invalid(parameter, "Only count accepts '*'")
       return { name, fn, field, definition: null, alias: `m${index}`, where: condition }
     }
-    const definition = fieldDefinition(field, parameter, { serializedTemporal: fn === 'min' || fn === 'max' })
+    const definition = fieldDefinition(field, parameter, { serializedTemporal: fn === 'min' || fn === 'max', owner: fn === 'countDistinct' })
     if (!MEASURES[fn].has(definition.type)) invalid(parameter, `${fn} cannot be applied to field '${field}' of type '${definition.type}'`)
     return { name, fn, field, definition, alias: `m${index}`, where: condition }
   })

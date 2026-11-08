@@ -1,6 +1,7 @@
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { getEffectiveSortableFields } from '../lib/querying/query-field-sort-helpers.js'
 import { compileAggregateRequest } from '../lib/querying/aggregate-query.js'
+import { isSystemContext } from '../../../lib/system-context.js'
 
 /**
  * Group a filtered collection and compute measures for each group.
@@ -18,7 +19,8 @@ export default async function aggregateMethod ({ params, context, vars, helpers,
     schemaInfo: context.schemaInfo,
     scopeName,
     defaultLimit: vars.queryDefaultLimit,
-    maxLimit: vars.queryMaxLimit
+    maxLimit: vars.queryMaxLimit,
+    system: isSystemContext(context)
   })
   const requestContracts = getRequestContracts({
     scopeName,

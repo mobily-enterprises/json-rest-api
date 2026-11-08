@@ -442,7 +442,17 @@ With a system context:
 - autofilter applies no ownership filters, and creates must set every ownership
   field explicitly (NULL creates a shared row);
 - row policies receive `system: true` and decide what it means for them;
-- permission checks run as usual; `isSystemContext(context)` lets them tell.
+- permission checks run as usual; `isSystemContext(context)` lets them tell;
+- `aggregate` may group by, and count distinct, a hidden ownership field, so a
+  job can find its units of work, then run each under a context for that owner:
+
+  ```js
+  const { data } = await api.resources.entries.aggregate({
+    groupBy: ['workspace_id'],
+    measures: { rows: { count: '*' } },
+    queryParams: { filters: { status: 'open' } }
+  }, createSystemContext('find workspaces with open entries'))
+  ```
 
 A context with `system: true` but no marker throws
 `REST_API_SYSTEM_CONTEXT_FORGED`. Create system contexts only in server code

@@ -1177,6 +1177,11 @@ foreign keys. Fields that are `hidden`, virtual, computed, or that have a getter
 the ones clients read. The exception is a `date` or `dateTime` field with
 `storage.serialize`: it may be bucketed and take `min` and `max`, whose results
 are read back as that field's values. `normallyHidden` fields are allowed.
+In a [system context](GUIDE/34-scoped-reads-and-locks.md#system-contexts), a
+hidden ownership (autofilter) field may also be grouped and take
+`countDistinct`, so a job can find which owners have rows; other callers are
+refused it, since one whose optional owner filter does not resolve would see
+every owner.
 
 #### Conditional measures
 

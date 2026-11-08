@@ -32,7 +32,8 @@ bulk options are rejected with a message that names their replacement.
   registrations take `{ batch: true }`.
 - **Aggregates:** measures take a `where` condition; `groupBy` takes date
   buckets (`day`, `week`, `month`, `year`) with a time zone; date fields with a
-  storage serializer can be bucketed and take `min` and `max`. See
+  storage serializer can be bucketed and take `min` and `max`. In a system
+  context, a hidden ownership field may be grouped and counted distinct. See
   [AGGREGATE](../API.md#aggregate---grouped-totals).
 - **One read for `get`:** a resource with no `checkPermissions`,
   `checkDataPermissions`, `checkDataPermissionsGet`, `beforeData` or
