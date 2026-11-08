@@ -186,7 +186,7 @@ describe(`Runtime customization and compiled cache ownership (${storageMode.mode
     const resource = fixture.api.resources.items
     const schemaInfo = resource.vars.schemaInfo
     assert.equal((await resource.query()).data.length, 2)
-    const contracts = schemaInfo.requestContracts
+    const contracts = new Map(schemaInfo.requestContractCache)
     let calls = 0
     await fixture.api.customize({
       vars: { format: 'plain', queryDefaultLimit: 1 },
@@ -207,7 +207,7 @@ describe(`Runtime customization and compiled cache ownership (${storageMode.mode
     assert.equal(typeof explicit.data[0].attributes.name, 'string')
     assert.equal(calls, 2)
     assert.equal(resource.vars.schemaInfo, schemaInfo)
-    assert.equal(schemaInfo.requestContracts, contracts)
+    for (const [key, contract] of contracts) assert.equal(schemaInfo.requestContractCache.get(key), contract, key)
   })
 
   it('refreshes sort validation while retaining the unchanged storage adapter', async () => {
@@ -215,15 +215,15 @@ describe(`Runtime customization and compiled cache ownership (${storageMode.mode
     const schemaInfo = resource.vars.schemaInfo
     const query = () => resource.query({ queryParams: { sort: ['amount'] } })
     assert.deepEqual((await query()).data.map(item => item.attributes.name), ['b', 'a'])
-    const contracts = schemaInfo.requestContracts
+    // Each set of sortable fields has its own query contract.
+    const hasQueryContract = fields => [...schemaInfo.requestContractCache.keys()].some(key => key.startsWith('query:') && key.endsWith(JSON.stringify(fields)))
     const adapter = fixture.api.helpers.getStorageAdapter('items')
     resource.vars.sortableFields = ['name']
     await assert.rejects(query(), { code: 'REST_API_VALIDATION' })
-    const restricted = schemaInfo.requestContracts
-    assert.notEqual(restricted, contracts)
+    assert.ok(hasQueryContract(['name']))
     resource.vars.sortableFields = ['amount', 'name']
     assert.deepEqual((await query()).data.map(item => item.attributes.name), ['b', 'a'])
-    assert.notEqual(schemaInfo.requestContracts, restricted)
+    assert.ok(hasQueryContract(['amount', 'name']))
     assert.equal(fixture.api.helpers.getStorageAdapter('items'), adapter)
     assert.equal(resource.vars.schemaInfo, schemaInfo)
   })

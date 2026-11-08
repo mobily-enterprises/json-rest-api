@@ -15,14 +15,13 @@ describe(`Request contract reuse (${storageMode.mode})`, () => {
   beforeEach(async () => {
     await fixture.reset()
     schemaInfo = fixture.api.resources.items.vars.schemaInfo
-    delete schemaInfo.requestContracts
-    delete schemaInfo.requestContractsCacheKey
+    delete schemaInfo.requestContractCache
   })
   after(async () => { await fixture?.close() })
   const contracts = extra => getRequestContracts({ scopeName: 'items', schemaInfo, includeDepthLimit: 3, sortableFields: ['id', 'name'], ...extra })
 
   it('builds write contracts from compiled relationship membership and definitions', () => {
-    const indexed = new Proxy({ ...schemaInfo, requestContracts: undefined, requestContractsCacheKey: undefined }, {
+    const indexed = new Proxy({ ...schemaInfo, requestContractCache: undefined }, {
       get (target, key, receiver) {
         if (key === 'schemaRelationships') throw new Error('Relationship declarations read while building contracts')
         return Reflect.get(target, key, receiver)
@@ -47,8 +46,7 @@ describe(`Request contract reuse (${storageMode.mode})`, () => {
   it('uses the belongs-to resource when a definition also carries target metadata', () => {
     const indexed = {
       ...schemaInfo,
-      requestContracts: undefined,
-      requestContractsCacheKey: undefined,
+      requestContractCache: undefined,
       outputRelationships: {
         ...schemaInfo.outputRelationships,
         group: { ...schemaInfo.outputRelationships.group, target: 'items' }
@@ -66,11 +64,11 @@ describe(`Request contract reuse (${storageMode.mode})`, () => {
     assert.throws(() => validateRequestContractOrThrow(contract, input('items')), { code: 'REST_API_VALIDATION' })
   })
 
-  it('reuses one compiled contract set across values and equivalent sort declarations', () => {
+  it('reuses the compiled contracts across values and equivalent sort declarations', () => {
     const first = contracts()
     for (let index = 0; index < 100; index++) {
       const next = contracts({ sortableFields: index % 2 ? ['name', 'id'] : ['id', 'name'] })
-      assert.equal(next, first)
+      for (const name of ['post', 'put', 'patch', 'get', 'query', 'postRelationship']) assert.equal(next[name], first[name], name)
       const payload = { data: { type: 'items', id: String(index), attributes: { name: `Item ${index}` } } }
       assert.equal(validateRequestContractOrThrow(next.post, payload).data.id, String(index))
     }
@@ -79,24 +77,27 @@ describe(`Request contract reuse (${storageMode.mode})`, () => {
   it('includes the resource name when reusing the same compiled field definitions', () => {
     const first = contracts()
     const other = contracts({ scopeName: 'other_items' })
-    assert.notEqual(other, first)
+    assert.notEqual(other.post, first.post)
     const payload = { data: { type: 'other_items', id: '1', attributes: { name: 'Other item' } } }
     assert.equal(validateRequestContractOrThrow(other.post, payload).data.type, 'other_items')
     assert.throws(() => validateRequestContractOrThrow(other.post, { data: { ...payload.data, type: 'items' } }), { code: 'REST_API_VALIDATION' })
     assert.equal(validateRequestContractOrThrow(contracts().post, { data: { ...payload.data, type: 'items' } }).data.type, 'items')
   })
 
-  it('replaces the retained variant when include depth or sortable fields change', () => {
+  it('keeps a variant per include depth and sortable fields, and the other contracts with them', () => {
     const original = contracts()
     const narrow = contracts({ includeDepthLimit: 1, sortableFields: ['id'] })
-    assert.notEqual(narrow, original)
+    assert.notEqual(narrow.query, original.query)
+    assert.notEqual(narrow.get, original.get)
     assert.throws(() => validateRequestContractOrThrow(narrow.query, { queryParams: { sort: ['name'] } }), { code: 'REST_API_VALIDATION' })
     assert.throws(() => validateRequestContractOrThrow(narrow.get, { id: '1', queryParams: { include: ['group.items'] } }), { code: 'REST_API_VALIDATION' })
-    assert.equal(schemaInfo.requestContracts, narrow)
-    assert.equal(contracts({ includeDepthLimit: 1, sortableFields: ['id'] }), narrow)
+    assert.equal(contracts({ includeDepthLimit: 1, sortableFields: ['id'] }).query, narrow.query)
+    // Neither the depth nor the sortable fields rebuild the write contracts.
+    assert.equal(narrow.post, original.post)
+    // A query (its effective sortable fields) beside a get or a write rebuilds nothing.
     const restored = contracts()
-    assert.notEqual(restored, narrow)
-    assert.equal(schemaInfo.requestContracts, restored)
+    assert.equal(restored.query, original.query)
+    assert.equal(restored.get, original.get)
     assert.deepEqual(validateRequestContractOrThrow(restored.query, { queryParams: { sort: ['name'] } }).queryParams.sort, ['name'])
   })
 })

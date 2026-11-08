@@ -551,51 +551,39 @@ function buildRelationshipRouteBodyContract (operation) {
   }
 }
 
-function buildRequestContracts ({ scopeName, schemaInfo, includeDepthLimit, sortableFields }) {
-  return {
-    post: buildWriteDocumentContract(scopeName, schemaInfo, 'post'),
-    put: buildWriteDocumentContract(scopeName, schemaInfo, 'put'),
-    patch: buildWriteDocumentContract(scopeName, schemaInfo, 'patch'),
-    get: buildGetRequestContract({ includeDepthLimit }),
-    query: buildQueryRequestContract({
-      includeDepthLimit,
-      sortableFields,
-      searchSchemaInstance: schemaInfo.searchSchemaInstance
-    }),
-    postRelationship: buildRelationshipRouteBodyContract('postRelationship'),
-    patchRelationship: buildRelationshipRouteBodyContract('patchRelationship'),
-    deleteRelationship: buildRelationshipRouteBodyContract('deleteRelationship')
-  }
-}
-
-function buildContractCacheKey ({ scopeName, includeDepthLimit, sortableFields }) {
-  return JSON.stringify({
-    scopeName,
-    includeDepthLimit,
-    sortableFields: Array.isArray(sortableFields) ? [...sortableFields].sort() : []
-  })
-}
-
+// Each contract is built on first use and cached on the schemaInfo by the inputs
+// it depends on, so callers that pass different sortable fields or include depths
+// (query beside get and the writes, say) do not rebuild each other's contracts.
 /** @param {{ scopeName: string, schemaInfo: object, includeDepthLimit?: number, sortableFields?: string[] }} options */
 export function getRequestContracts ({ scopeName, schemaInfo, includeDepthLimit = 3, sortableFields = [] }) {
   installRequestContractSupport()
-
-  const cacheKey = buildContractCacheKey({ scopeName, includeDepthLimit, sortableFields })
-  if (schemaInfo.requestContracts && schemaInfo.requestContractsCacheKey === cacheKey) {
-    return schemaInfo.requestContracts
+  /** @type {Map<string, any>} */
+  const cache = (schemaInfo.requestContractCache ||= new Map())
+  /** @param {string} key @param {() => any} build */
+  const cached = (key, build) => {
+    let contract = cache.get(key)
+    if (!contract) cache.set(key, contract = build())
+    return contract
   }
-
-  const requestContracts = buildRequestContracts({
-    scopeName,
-    schemaInfo,
-    includeDepthLimit,
-    sortableFields
-  })
-
-  schemaInfo.requestContracts = requestContracts
-  schemaInfo.requestContractsCacheKey = cacheKey
-
-  return requestContracts
+  const write = (/** @type {'post' | 'put' | 'patch'} */ mode) => cached(`${mode}:${scopeName}`, () => buildWriteDocumentContract(scopeName, schemaInfo, mode))
+  const route = (/** @type {string} */ operation) => cached(operation, () => buildRelationshipRouteBodyContract(operation))
+  return {
+    get post () { return write('post') },
+    get put () { return write('put') },
+    get patch () { return write('patch') },
+    get get () { return cached(`get:${includeDepthLimit}`, () => buildGetRequestContract({ includeDepthLimit })) },
+    get query () {
+      const sorted = Array.isArray(sortableFields) ? [...sortableFields].sort() : []
+      return cached(`query:${includeDepthLimit}:${JSON.stringify(sorted)}`, () => buildQueryRequestContract({
+        includeDepthLimit,
+        sortableFields,
+        searchSchemaInstance: schemaInfo.searchSchemaInstance
+      }))
+    },
+    get postRelationship () { return route('postRelationship') },
+    get patchRelationship () { return route('patchRelationship') },
+    get deleteRelationship () { return route('deleteRelationship') }
+  }
 }
 
 export function validateRequestContractOrThrow (contract, payload, message = 'Request validation failed') {
