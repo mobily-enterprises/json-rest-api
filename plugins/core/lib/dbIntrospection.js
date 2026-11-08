@@ -188,6 +188,10 @@ function resolveTypeKind ({ name = '', dataType = '', columnType = '' } = {}) {
     return 'boolean'
   }
 
+  if (normalizedType === 'xid8') {
+    return 'xid8'
+  }
+
   if (['datetime', 'timestamp', 'timestamp with time zone', 'timestamp without time zone'].includes(normalizedType)) {
     return 'datetime'
   }

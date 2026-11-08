@@ -2341,6 +2341,33 @@ are not an email address or a UUID. Filters with a text operator (`like`,
 type json-rest-schema cannot cast, so a misspelt type fails at `addResource`
 rather than on the first write.
 
+#### Transaction ID Fields (PostgreSQL)
+
+`type: 'xid8'` is PostgreSQL's 64-bit transaction id, the value
+`pg_current_xact_id()` returns, for a column a table stamps with the
+transaction that last wrote each row. Values are decimal text below 2^64 (a
+`bigint` is accepted too) and are stored and returned as canonical text,
+without leading zeros; anything else fails with `RestApiValidationError`
+before a statement runs, in writes and in filters. Filters compare in the
+database as xid8: `=`, `!=`, `<`, `<=`, `>`, `>=`, and `in` or `between` through
+an array search field whose `actualField` is the xid8 field; text search
+operators are refused at registration. `aggregate` takes `min` and `max` of it,
+not `sum` or `avg`. `createKnexTable` makes an `xid8` column. Only Knex storage
+on PostgreSQL has the type: registration refuses an xid8 field, or a search
+field on one, on any other database and on AnyAPI storage.
+
+```javascript
+await api.addResource('messages', {
+  schema: {
+    body: { type: 'string', required: true },
+    changed: { type: 'xid8' } // DEFAULT pg_current_xact_id(), set again by an UPDATE trigger
+  },
+  searchSchema: {
+    changedSince: { type: 'xid8', actualField: 'changed', filterOperator: '>=' }
+  }
+})
+```
+
 #### Retired Fields
 
 `retired: true` keeps a stored field readable, filterable and sortable while

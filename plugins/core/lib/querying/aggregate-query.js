@@ -3,7 +3,7 @@ import { applyDatabaseReadOptions, normalizeStoredFieldValue } from '../querying
 import { databaseFamily } from '../querying-writing/database-capabilities.js'
 
 const NUMERIC_TYPES = new Set(['number', 'integer', 'epochMilliseconds', 'epochSeconds'])
-const ORDERED_TYPES = new Set([...NUMERIC_TYPES, 'string', 'email', 'uuid', 'date', 'dateTime', 'time'])
+const ORDERED_TYPES = new Set([...NUMERIC_TYPES, 'string', 'email', 'uuid', 'xid8', 'date', 'dateTime', 'time'])
 const SCALAR_TYPES = new Set([...ORDERED_TYPES, 'boolean', 'id'])
 // Measure functions and the field types each accepts.
 const MEASURES = {

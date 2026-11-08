@@ -15,6 +15,8 @@ import {
 } from './canonical-storage-mapping.js'
 import { assertScalarQueryField } from '../querying-writing/field-utils.js'
 import { assertSingleColumnValue, normalizeValueForDatabaseStorage } from '../querying-writing/database-value-normalizers.js'
+import { xid8Text } from '../querying-writing/field-types.js'
+import { RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 
 /** @import { BaseStorageAdapterOptions, CanonicalDescriptor, SelectTranslator, StorageAdapter, StorageAdapterOptions, StorageAdapterLookupOptions, StorageSchemaInfo, StorageFieldDefinition } from './storage-types.js' */
 
@@ -92,6 +94,12 @@ const normalizeFilterValueForDefinition = (value, definition = {}, { isRelations
 
   if (type === 'boolean') {
     return normalizeBooleanValue(value)
+  }
+
+  if (type === 'xid8') {
+    const text = xid8Text(value)
+    if (text === undefined) throw new RestApiValidationError(`${parameter} must be an xid8: decimal digits below 2^64`, { fields: [parameter] })
+    return text
   }
 
   if (['date', 'dateTime', 'time'].includes(type)) {
@@ -211,7 +219,8 @@ const createTableAdapter = ({ knex, schemaInfo }) => {
       })
       return Array.isArray(value) ? value.map(serialize) : serialize(value)
     }
-    const definition = searchField || schemaField || {}
+    // An in or between filter on an xid8 field is an array search field; its values are xid8s.
+    const definition = schemaField?.type === 'xid8' ? schemaField : searchField || schemaField || {}
     const isRelationship = Boolean(
       searchField?.isRelationship ||
       schemaField?.belongsTo ||

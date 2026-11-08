@@ -18,14 +18,65 @@ const formattedStringType = (pattern, format) => {
   return type
 }
 
+const XID8_PATTERN = /^[0-9]{1,20}$/
+const XID8_LIMIT = 2n ** 64n
+
+/**
+ * PostgreSQL's 64-bit transaction id (xid8) as canonical decimal text, without
+ * leading zeros, from 1 to 20 digits below 2^64 or a bigint; undefined for
+ * anything else.
+ * @param {unknown} value
+ * @returns {string | undefined}
+ */
+export function xid8Text (value) {
+  const text = typeof value === 'bigint' ? value.toString() : value
+  if (typeof text !== 'string' || !XID8_PATTERN.test(text)) return undefined
+  const number = BigInt(text)
+  return number < XID8_LIMIT ? number.toString() : undefined
+}
+
+/** @param {any} context */
+const xid8Type = (context) => {
+  const text = xid8Text(context.value)
+  if (text === undefined) context.throwTypeError()
+  return text
+}
+xid8Type.toJsonSchema = () => ({ type: 'string', format: 'xid8', pattern: XID8_PATTERN.source })
+
 let installed = false
 
-/** Register the string types json-rest-schema lacks; both storages keep them in string columns. */
+/**
+ * Register the types json-rest-schema lacks: email and uuid, which every
+ * storage keeps in string columns, and xid8, PostgreSQL's transaction id.
+ */
 export function installFieldTypes () {
   if (installed) return
   installed = true
   addType('email', formattedStringType(EMAIL_PATTERN, 'email'))
   addType('uuid', formattedStringType(UUID_PATTERN, 'uuid'))
+  addType('xid8', xid8Type)
+}
+
+/**
+ * Refuse xid8 fields, and search fields on them, except on Knex storage on
+ * PostgreSQL: other databases have no such type, and a text column would
+ * compare the values as text. Text search on them is refused everywhere.
+ * @param {{ schemaStructure?: Record<string, any>, searchSchemaStructure?: Record<string, any> }} schemaInfo
+ * @param {string} scopeName
+ * @param {boolean} postgres Knex storage on PostgreSQL
+ */
+export function assertXid8Fields (schemaInfo, scopeName, postgres) {
+  const fields = schemaInfo.schemaStructure || {}
+  for (const [name, definition] of [...Object.entries(fields), ...Object.entries(schemaInfo.searchSchemaStructure || {})]) {
+    const target = definition?.actualField ? fields[definition.actualField] : undefined
+    if (definition?.type !== 'xid8' && target?.type !== 'xid8') continue
+    if (!postgres) {
+      throw new Error(`Field '${name}' in resource '${scopeName}' has type 'xid8', PostgreSQL's transaction id, which only Knex storage on PostgreSQL has`)
+    }
+    if (isTextSearch(definition)) {
+      throw new Error(`Search field '${name}' in resource '${scopeName}' searches text in an xid8 field; use =, !=, <, <=, >, >=, between or in`)
+    }
+  }
 }
 
 /**

@@ -389,6 +389,8 @@ function normalizeDesiredTypeKind (definition = {}) {
     case 'epochMilliseconds':
     case 'epochSeconds':
       return 'integer'
+    case 'xid8':
+      return 'xid8'
     case 'string':
     case 'none':
     default:
@@ -599,6 +601,9 @@ function mapTypeToKnex (table, columnName, definition, options = {}) {
     case 'epochSeconds':
       return table.bigInteger(columnName)
 
+    case 'xid8':
+      return table.specificType(columnName, 'xid8')
+
     case 'array':
     case 'object':
     case 'serialize':
@@ -740,6 +745,10 @@ function buildColumnBuilderCode (columnName, definition, options = {}) {
       case 'epochMilliseconds':
       case 'epochSeconds':
         line = `table.bigInteger(${quoteJsString(columnName)})`
+        break
+
+      case 'xid8':
+        line = `table.specificType(${quoteJsString(columnName)}, 'xid8')`
         break
 
       case 'array':

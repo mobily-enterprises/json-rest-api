@@ -1,7 +1,8 @@
 import type { StorageFieldDefinition, StorageQuery } from '../plugins/core/lib/storage/storage-types.js'
 import type { FileStorage } from './file-storage.js'
 
-export type ResourceFieldType = 'string' | 'email' | 'uuid' | 'number' | 'integer' | 'boolean' | 'id' |
+// xid8: PostgreSQL's transaction id, decimal text; Knex storage on PostgreSQL only.
+export type ResourceFieldType = 'string' | 'email' | 'uuid' | 'xid8' | 'number' | 'integer' | 'boolean' | 'id' |
   'date' | 'time' | 'dateTime' | 'epochSeconds' | 'epochMilliseconds' |
   'array' | 'object' | 'file' | 'blob' | 'serialize' | 'none'
 
@@ -120,6 +121,8 @@ type BaseValue<Field, Mode extends Direction> =
   : Field extends { type: 'number' | 'integer' | 'epochSeconds' | 'epochMilliseconds' } ? number
   : Field extends { type: 'boolean' } ? boolean
   : Field extends { type: 'id' } ? string | number
+  // Answered as canonical decimal text; a bigint is accepted on input.
+  : Field extends { type: 'xid8' } ? Mode extends 'output' ? string : string | bigint
   : Field extends { type: 'array' } ? Field extends { items: infer Items } ? NestedValue<Items, Mode>[] : unknown[]
   : Field extends { type: 'object' } ? ObjectValue<Field, Mode> : unknown
 
