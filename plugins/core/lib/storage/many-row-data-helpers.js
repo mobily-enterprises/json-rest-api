@@ -30,6 +30,20 @@ export function databaseFamily (db) {
 const FOUND_ROWS = 0x2
 
 /**
+ * Refuses a selection write on MySQL or MariaDB whose scope joins a derived
+ * table, as a filter on another table's field does: InnoDB reads a derived
+ * table from the snapshot without locking it, so the write could not re-check
+ * that filter on a row it waited for.
+ * @param {{ db: any, scope: any, filters?: Record<string, unknown>, method: string, scopeName: string }} request
+ */
+function refuseUnlockedSelection ({ db, scope, filters, method, scopeName }) {
+  if (!filters || !Object.keys(filters).length || databaseFamily(db) !== 'mysql') return
+  if (!scope._statements.some(statement => statement.grouping === 'join' && typeof statement.table !== 'string')) return
+  const message = `${method} on '${scopeName}' filters on another table, which MySQL and MariaDB read from the transaction snapshot without locking it; filter on the row's own columns instead, for example on a link after locking its targets with lockByIds`
+  throw new RestApiValidationError(message, { fields: ['filters'], violations: [{ field: 'filters', rule: 'selection_cross_table', message }] })
+}
+
+/**
  * Whether an UPDATE's count is the rows it matched. PostgreSQL and SQLite
  * always count those; MySQL and MariaDB do so only on a connection with the
  * FOUND_ROWS client flag, the drivers' default, and count the rows it changed
@@ -188,6 +202,8 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const tableName = storageAdapter.getTableName()
     const idColumn = `${tableName}.${storageAdapter.getIdColumn()}`
     const { query } = await dataScopedQuery({ scopeName, context, runHooks, purpose: queryPurpose, filters })
+    // A selection write reads its rows here first, so it is refused here whatever rows match.
+    if (queryPurpose === 'bulk-write') refuseUnlockedSelection({ db, scope: query, filters, method: context.method, scopeName })
     if (ids) query.whereIn(idColumn, ids.map(id => storageAdapter.translateFilterValue('id', id)))
     if (after !== undefined) query.where(idColumn, '>', storageAdapter.translateFilterValue('id', after))
     // Policy joins can repeat a row; the identity projection keeps big integers exact.
@@ -351,6 +367,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     // would both write it. A subquery does not see that row: InnoDB reads it
     // from the transaction snapshot, PostgreSQL as of the statement's start.
     const selection = Boolean(scope && filters && Object.keys(filters).length)
+    if (selection) refuseUnlockedSelection({ db, scope, filters, method: context.method, scopeName })
     return {
       matching,
       // PostgreSQL: lock the rows first, so the statement that writes them

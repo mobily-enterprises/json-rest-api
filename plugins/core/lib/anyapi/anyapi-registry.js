@@ -20,7 +20,8 @@ const DEFAULT_CACHE_SIZE = 100
 const EMPTY_RUNTIME = Object.freeze({ schema: {}, searchSchema: {}, callbacks: [] })
 
 // Errors from two servers inserting the same new resource at once.
-const WRITE_CONFLICT_CODES = new Set(['23505', '40001', '40P01', 'ER_DUP_ENTRY', 'ER_LOCK_DEADLOCK', 'SQLITE_BUSY', 'SQLITE_CONSTRAINT_UNIQUE'])
+// ER_CHECKREAD (1020): MariaDB with innodb_snapshot_isolation refuses a row changed since the snapshot.
+const WRITE_CONFLICT_CODES = new Set(['23505', '40001', '40P01', 'ER_DUP_ENTRY', 'ER_LOCK_DEADLOCK', 'ER_CHECKREAD', 'SQLITE_BUSY', 'SQLITE_CONSTRAINT_UNIQUE'])
 const creationRaces = new WeakSet()
 
 const resolveIdProperty = (schema = {}, explicitIdProperty = null) => {
@@ -113,7 +114,7 @@ const rowsSignature = (rows, columns) => JSON.stringify(rows.map(row => columns.
   return value ?? null
 })).sort((left, right) => String(left[0]).localeCompare(String(right[0]))))
 
-const isWriteConflict = error => WRITE_CONFLICT_CODES.has(error?.code) || [1062, 1213].includes(error?.errno)
+const isWriteConflict = error => WRITE_CONFLICT_CODES.has(error?.code) || [1020, 1062, 1213].includes(error?.errno)
 
 /**
  * Canonical resource metadata. One registry can serve every tenant API that

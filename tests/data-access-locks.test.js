@@ -344,6 +344,69 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
     })
   }
 
+  // A filter on another table's field is read through a derived table. PostgreSQL
+  // reads it again once the row is locked; InnoDB would read it from the snapshot
+  // without locking it, so MySQL and MariaDB refuse it in a selection write.
+  it('re-checks a filter on another table on PostgreSQL, and MySQL and MariaDB refuse it', { skip: !serverDatabase && 'SQLite has one writer' }, async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    const named = transaction => entries.patchWhere({ filters: { code: 'E1', accountName: 'A visible' }, data: { amount: 999 }, returning: 'count', transaction }, workspaceA())
+    if (isMysql) {
+      // The write and the transaction around it each wrap the refusal.
+      const root = error => error?.cause ? root(error.cause) : error
+      const refused = error => root(error) instanceof RestApiValidationError && root(error).details.violations.some(violation => violation.rule === 'selection_cross_table')
+      // Refused whatever the data: also when no row matches.
+      for (const write of [
+        named,
+        transaction => entries.deleteWhere({ filters: { accountName: 'A visible' }, transaction }, workspaceA()),
+        transaction => entries.patchWhere({ filters: { accountName: 'No such account' }, data: { amount: 999 }, returning: 'count', transaction }, workspaceA()),
+        transaction => entries.deleteWhere({ filters: { accountName: 'No such account' }, transaction }, workspaceA())
+      ]) {
+        await assert.rejects(fixture.api.transaction(write), refused)
+      }
+      assert.equal(Number((await fixture.knex('da_entries').where({ id: 1 }).first()).amount), 10)
+      return
+    }
+    const outcome = await whileWaiting({
+      hold: async transaction => {
+        await transaction('da_entries').where({ id: 1 }).update({ amount: 5 })
+        await transaction('da_accounts').where({ id: 1 }).update({ name: 'Renamed' })
+      },
+      write: () => {},
+      waiter: named
+    })
+    assert.equal(outcome.meta.count, 0)
+    assert.equal(Number((await fixture.knex('da_entries').where({ id: 1 }).first()).amount), 5)
+  })
+
+  // SQLite has one writer: the second selection write fails rather than waits, so it
+  // cannot write over the first either.
+  it('patchWhere and deleteWhere fail while a concurrent SQLite writer holds the row', { skip: serverDatabase && 'SQLite only' }, async () => {
+    // A file database in WAL mode with busy_timeout 0: a second writer fails at once.
+    const local = await createDataAccessFixture({ databaseOptions: { concurrent: true, maxConnections: 4 } })
+    try {
+      const busy = error => /SQLITE_BUSY|database is locked/.test(`${cause(error)?.code} ${cause(error)?.message}`)
+      const entries = local.api.resources.da_entries
+      const open = { filters: { code: 'E1', status: 'open' }, returning: 'count' }
+      const second = {
+        patchWhere: transaction => entries.patchWhere({ ...open, data: { amount: 999 }, transaction }, workspaceA()),
+        deleteWhere: transaction => entries.deleteWhere({ ...open, transaction }, workspaceA())
+      }
+      for (const [method, waiter] of Object.entries(second)) {
+        await seedLedger(local)
+        await local.api.transaction(async transaction => {
+          const first = await entries.patchWhere({ ...open, data: { status: 'held' }, transaction }, workspaceA())
+          assert.equal(first.meta.count, 1)
+          await assert.rejects(local.api.transaction(waiter), busy, method)
+        })
+        const row = await local.knex('da_entries').where({ id: 1 }).first()
+        assert.deepEqual({ status: row?.status, amount: Number(row?.amount) }, { status: 'held', amount: 10 }, method)
+      }
+    } finally {
+      await local.close()
+    }
+  })
+
   it('claims matching rows in sort order inside the scope', async () => {
     await seedJobs()
     const jobs = fixture.api.resources.da_jobs

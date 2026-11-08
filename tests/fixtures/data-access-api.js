@@ -57,7 +57,7 @@ export async function createDataAccessApi (knex, { storage = storageMode.mode, e
   await api.addResource('da_accounts', {
     schema: {
       id: { type: 'id' },
-      name: { type: 'string', required: true, max: 100 },
+      name: { type: 'string', required: true, max: 100, indexed: true },
       workspace_id: { type: 'string', required: true, max: 40 },
       access_group: { type: 'string', required: true, max: 20 }
     },
@@ -80,6 +80,8 @@ export async function createDataAccessApi (knex, { storage = storageMode.mode, e
     relationships: {
       labels: { type: 'manyToMany', target: 'da_labels', through: 'da_entry_labels', foreignKey: 'entry_id', otherKey: 'label_id' }
     },
+    // A filter on another table's field.
+    searchSchema: { accountName: { type: 'string', actualField: 'da_accounts.name' } },
     autofilter: 'workspace',
     rowPolicy: 'groupVisibility',
     ...(storage === 'anyapi' ? {} : { lockVersionField: 'lock_version' }),

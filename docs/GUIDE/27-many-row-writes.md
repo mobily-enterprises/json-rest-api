@@ -199,9 +199,23 @@ same row, the one that waits for the other's lock finds the row the other
 committed, and leaves it out if it no longer matches. PostgreSQL locks the rows
 first, so the statement that writes them starts after the wait; MySQL and
 MariaDB check the scope and the filters in the locking read itself, which
-therefore also locks the rows it reads from any table the filters or the row
-policy join. With MariaDB's `innodb_snapshot_isolation` on, the waiting
-transaction fails instead ("Record has changed since last read"); retry it.
+therefore also locks the rows it joins from other tables. With MariaDB's
+`innodb_snapshot_isolation` on, the waiting transaction fails instead ("Record
+has changed since last read", errno 1020); retry it. SQLite has one writer:
+the second transaction fails with `SQLITE_BUSY` rather than write over the
+first, or, if it starts after the first commits, finds the row the first
+committed.
+
+A filter on another table's field (a `searchSchema` field whose `actualField`
+names another table) is read through a derived table. PostgreSQL reads it
+again after the wait, so it too is a compare-and-set; InnoDB would read it from
+the snapshot without locking it, so on MySQL and MariaDB `patchWhere` and
+`deleteWhere` refuse filters whose scope joins a derived table (rule
+`selection_cross_table`), whatever rows they match. Filter on the row's own
+columns instead, for example on the link itself after locking its targets with
+`lockByIds` on their resource. A custom `applyFilter` that reads another table
+through its own subquery is not detected: MySQL and MariaDB read that subquery
+from the snapshot too, so it is no compare-and-set there.
 
 The UPDATE, DELETE and lock statements repeat the caller's ownership
 (autofilter) conditions as plain column predicates. A row that another
