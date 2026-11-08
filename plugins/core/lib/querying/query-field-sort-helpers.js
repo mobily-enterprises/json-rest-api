@@ -161,18 +161,27 @@ export const applyColumnOrder = (query, column, direction, nulls = 'last') => {
   }
 }
 
-// Both storage modes use the same cursor direction and null placement.
+// Rows written through the API always store a value in a required, non-nullable
+// attribute. Setters, serializers and nullOnEmpty can still store NULL.
+export const storesNoNull = definition => definition?.required === true && definition.nullable !== true &&
+  definition.nullOnEmpty !== true && !definition.setter && !definition.storage?.serialize
+
+// Both storage modes use the same cursor direction and null placement. A column
+// that holds no NULL (`nullable: false`) sorts without a placement, so PostgreSQL
+// and MySQL can read either direction from an index on it.
 /**
  * @param {import('../storage/storage-types.js').StorageQuery} query
- * @param {{ column?: string, queryFieldRuntime?: import('../querying-writing/query-field-types.js').ProjectionRuntime, direction: string }} descriptor
+ * @param {{ column?: string, queryFieldRuntime?: import('../querying-writing/query-field-types.js').ProjectionRuntime, direction: string, nullable?: boolean }} descriptor
  * @param {{ before?: boolean }} [options]
  */
-export const applySortDescriptorOrder = (query, { column, queryFieldRuntime, direction }, { before = false } = {}) => {
+export const applySortDescriptorOrder = (query, { column, queryFieldRuntime, direction, nullable = true }, { before = false } = {}) => {
   const ascending = String(direction).toLowerCase() === 'asc'
   const queryDirection = (before ? !ascending : ascending) ? 'asc' : 'desc'
   const nulls = before ? 'first' : 'last'
   if (queryFieldRuntime) {
     applyQueryFieldOrder(query, queryFieldRuntime, queryDirection.toUpperCase(), nulls)
+  } else if (nullable === false) {
+    query.orderBy(column, queryDirection)
   } else {
     applyColumnOrder(query, column, queryDirection, nulls)
   }
@@ -259,7 +268,8 @@ export const buildCursorPredicateChains = (
       descriptor,
       operator: cursorValue === null ? 'IS NOT NULL' : operator,
       value: cursorValue,
-      includeNull: cursorValue !== null && forward
+      // A column that holds no NULL has no null group to reach.
+      includeNull: cursorValue !== null && forward && descriptor.nullable !== false
     })
 
     predicateChains.push(chain)

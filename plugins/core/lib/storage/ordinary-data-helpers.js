@@ -1,7 +1,7 @@
 // @ts-check
-/** @import { DataMinimalRequest, DataReadContext, DataRelatedIdsQuery, DataResource, DataSortDescriptor, DataSortRequest, OrdinaryDataDependencies, OrdinaryDataReadHelpers, OrdinaryDataWriteHelpers, StorageRow } from './storage-types.js' */
+/** @import { DataMinimalRequest, DataReadContext, DataRelatedIdsQuery, DataResource, DataSortDescriptor, DataSortRequest, OrdinaryDataDependencies, OrdinaryDataReadHelpers, OrdinaryDataWriteHelpers, StorageFieldDefinition, StorageRow } from './storage-types.js' */
 import { prepareReferenceSortColumns } from '../querying/knex-query-helpers.js'
-import { applySortDescriptorOrder, buildEffectiveSortList, parseSortEntry, resolveSortField } from '../querying/query-field-sort-helpers.js'
+import { applySortDescriptorOrder, buildEffectiveSortList, parseSortEntry, resolveSortField, storesNoNull } from '../querying/query-field-sort-helpers.js'
 import { deletePivotReferences, invalidateDeletedPivotTargets } from '../writing/many-to-many-manipulations.js'
 import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
 import { buildJsonApiResponse } from '../querying/knex-json-api-transformers-querying.js'
@@ -109,7 +109,13 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
         ? storageColumn
         : `${storageAdapter.getTableName()}.${storageColumn}`)
 
-      applySortDescriptorOrder(query, { column: translatedField, direction }, { before })
+      /** @type {StorageFieldDefinition} */
+      const definition = schemaInfo.schemaStructure?.[dbField] || { type: field === 'id' ? 'id' : undefined }
+      const isRelationship = Boolean(definition.belongsTo || (dbField !== field && searchField?.isRelationship))
+      // The primary key and required attributes of this table hold no NULL. A
+      // joined reference reads as NULL when hidden, and a foreign key can be cleared.
+      const nullable = Boolean(reference) || isRelationship || !(field === 'id' || storesNoNull(definition))
+      applySortDescriptorOrder(query, { column: translatedField, direction, nullable }, { before })
       descriptors.push({
         field,
         direction: sqlDirection,
@@ -117,8 +123,9 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
         actualField: dbField,
         resultColumn: field === 'id' ? 'id' : storageColumn,
         ...(reference || {}),
-        definition: schemaInfo.schemaStructure?.[dbField] || { type: field === 'id' ? 'id' : undefined },
-        isRelationship: Boolean(schemaInfo.schemaStructure?.[dbField]?.belongsTo || (dbField !== field && searchField?.isRelationship))
+        definition,
+        isRelationship,
+        nullable
       })
     }
 

@@ -492,6 +492,8 @@ export interface DataSortDescriptor {
   referenceField?: string
   definition?: StorageFieldDefinition | null
   isRelationship: boolean
+  /** False when the column cannot hold NULL: it then sorts and pages without a null placement. */
+  nullable?: boolean
   queryFieldRuntime?: import('../querying-writing/query-field-types.js').ProjectionRuntime
 }
 

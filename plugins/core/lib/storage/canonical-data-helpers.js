@@ -67,7 +67,10 @@ export function createCanonicalDataHelpers ({
       const fieldInfo = resolveFieldInfo(descriptor, actualField)
       if (!fieldInfo?.column) continue
       const column = reference?.column || `${tableAlias}.${fieldInfo.column}`
-      applySortDescriptorOrder(query, { column, direction }, { before })
+      // Only the logical ID holds no NULL: a field added to existing records
+      // leaves their slots empty, whatever its declaration.
+      const nullable = Boolean(reference) || field !== 'id'
+      applySortDescriptorOrder(query, { column, direction, nullable }, { before })
       descriptors.push({
         field,
         column,
@@ -77,6 +80,7 @@ export function createCanonicalDataHelpers ({
         direction,
         definition: scope.vars.schemaInfo.schemaStructure[actualField] || fieldInfo.definition || null,
         isRelationship: fieldInfo.isRelationship || false,
+        nullable,
       })
     }
 

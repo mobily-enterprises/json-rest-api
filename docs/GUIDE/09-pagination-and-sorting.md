@@ -39,6 +39,19 @@ The resource default sorts by name. A query may override it using
 provides stable ordering where the selected values are equal. `defaultSort`
 accepts a string or an array of strings; object-shaped defaults are rejected.
 
+Values that may be NULL sort after every other value, in either direction. The
+ID, and on table storage a `required` attribute that is not `nullable`, holds no
+NULL and sorts without that placement, so an index ending with the sort columns
+serves its pages in either direction on every database: an index on
+`(authorId, id)` serves books filtered by author and sorted by `-id`. A
+descending sort on another field still breaks ties by ascending ID; end it with
+`-id`, as in `['-name', '-id']`, to read it from a `(name, id)` index. Other sort
+values keep the placement: nullable attributes, attributes with a setter,
+serializer or `nullOnEmpty`, relationship fields, query projections and AnyAPI
+attributes (a field added later leaves existing records' slots empty).
+PostgreSQL then reads only ascending sorts from a plain index; MariaDB, and
+MySQL on a nullable column, sort the matching rows.
+
 ## Default limits and numbered pages
 
 ```javascript
