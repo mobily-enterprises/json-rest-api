@@ -154,6 +154,10 @@ describe(`System context, shared rows, scopedQuery and queryAll (${storageMode.m
     const { query: visible } = await entries.scopedQuery({}, workspaceB())
     const accounts = await fixture.knex('da_accounts').whereIn('id', visible.select('account_id')).select('id')
     assert.deepEqual(accounts.map(row => Number(row.id)), [3])
+    // So does one compared with =, which Knex's MySQL compiler inspects as an object.
+    const { query: first } = await entries.scopedQuery({}, workspaceB())
+    const account = await fixture.knex('da_accounts').where('id', '=', first.select('account_id').limit(1)).select('id')
+    assert.deepEqual(account.map(row => Number(row.id)), [3])
   })
 
   it('reads every visible row in cursor pages with flat statement counts', async () => {

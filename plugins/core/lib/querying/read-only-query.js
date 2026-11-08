@@ -27,11 +27,14 @@ let insideBuilderMethod = 0
 const BUILDER_STATE = new Set(['client', '_single', '_statements'])
 
 // Outside Knex's methods the statement lists read as frozen copies, so code
-// cannot push, splice or edit a predicate in place.
+// cannot push, splice or edit a predicate in place. The single values (table,
+// limit, offset and the like) read as a plain copy: Knex's SQLite compiler
+// rewrites the copy's limit when it compiles the builder as a subquery, and a
+// change to the copy reaches no query.
 /** @param {unknown} value */
-const frozenState = value => {
+const stateCopy = value => {
   if (Array.isArray(value)) return Object.freeze(value.map(entry => entry && typeof entry === 'object' ? Object.freeze({ ...entry }) : entry))
-  return value && typeof value === 'object' ? Object.freeze({ ...value }) : value
+  return value && typeof value === 'object' ? { ...value } : value
 }
 
 /**
@@ -56,7 +59,7 @@ export function readOnlyQueryBuilder (builder, { resourceType = 'query' } = {}) 
       if (typeof property === 'string' && FORBIDDEN_METHODS.has(property)) return () => refuse(property)
       if (property === 'client' && !insideBuilderMethod) refuse('client')
       const value = Reflect.get(target, property, receiver)
-      if ((property === '_single' || property === '_statements') && !insideBuilderMethod) return frozenState(value)
+      if ((property === '_single' || property === '_statements') && !insideBuilderMethod) return stateCopy(value)
       if (typeof value !== 'function' || property === 'constructor') return value
       return /** @this {unknown} */ function (/** @type {unknown[]} */ ...args) {
         insideBuilderMethod++
@@ -78,7 +81,12 @@ export function readOnlyQueryBuilder (builder, { resourceType = 'query' } = {}) 
       return Reflect.set(target, property, value)
     },
     defineProperty (_target, property) { return refuse(`defineProperty ${String(property)}`) },
-    deleteProperty (_target, property) { return refuse(`delete ${String(property)}`) }
+    // Deletes follow the rules of set: lodash's isPlainObject, which Knex's MySQL
+    // compiler runs on a subquery value, sets and then deletes Symbol.toStringTag.
+    deleteProperty (target, property) {
+      if (property === 'client' || property === '_method' || (BUILDER_STATE.has(String(property)) && !insideBuilderMethod)) refuse(`delete ${String(property)}`)
+      return Reflect.deleteProperty(target, property)
+    }
   })
   return proxy
 }

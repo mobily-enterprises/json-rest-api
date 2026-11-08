@@ -1,5 +1,6 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import knexLib from 'knex'
 import {
   FileHandlingPlugin,
   RestApiBulkWriteUnsupportedError,
@@ -10,6 +11,7 @@ import {
   createSystemContext
 } from '../index.js'
 import { PositioningPlugin } from '../plugins/core/rest-api-positioning-plugin.js'
+import { readOnlyQueryBuilder } from '../plugins/core/lib/querying/read-only-query.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { databaseClient } from './helpers/test-database.js'
 import { cleanTables } from './helpers/test-utils.js'
@@ -149,6 +151,15 @@ describe(`Data-access hardening (${storageMode.mode})`, () => {
       assert.throws(() => { query.client = null }, RestApiScopedQueryReadOnlyError)
       assert.throws(() => Object.defineProperty(query, '_method', { value: 'del' }), RestApiScopedQueryReadOnlyError)
       assert.throws(() => { delete query._statements }, RestApiScopedQueryReadOnlyError)
+      assert.throws(() => { delete query._method }, RestApiScopedQueryReadOnlyError)
+      // Compilers take a read-only builder as a subquery value, whatever database this run
+      // uses: MySQL's inspects it as an object, SQLite's rewrites its limit.
+      for (const client of ['mysql2', 'better-sqlite3']) {
+        const db = knexLib({ client, useNullAsDefault: true })
+        const subquery = readOnlyQueryBuilder(db('da_entries').select('account_id').limit(1))
+        assert.match(db('da_accounts').where('id', '=', subquery).toSQL().sql, /= \(select `account_id` from `da_entries` limit \?\)/, client)
+        await db.destroy()
+      }
       assert.throws(() => { query._statements = [] }, RestApiScopedQueryReadOnlyError)
       assert.throws(() => { query._single = {} }, RestApiScopedQueryReadOnlyError)
       // The statement lists read as frozen copies, so they cannot change in place.
@@ -157,7 +168,8 @@ describe(`Data-access hardening (${storageMode.mode})`, () => {
       assert.ok(statements.length && Object.isFrozen(statements) && statements.every(statement => Object.isFrozen(statement)))
       assert.throws(() => statements.push({ grouping: 'where', type: 'whereRaw', value: fixture.knex.raw('1 = 1') }), TypeError)
       assert.throws(() => { statements[0].value = null }, TypeError)
-      assert.throws(() => { narrowed._single.table = 'da_accounts' }, TypeError)
+      // The single values read as a copy; changing it changes no query.
+      narrowed._single.table = 'da_accounts'
       assert.equal(await count(narrowed), 3)
       // Knex's own methods still reach the client, and modify passes the read-only builder on.
       assert.throws(() => query.clone().modify(builder => builder.del()), RestApiScopedQueryReadOnlyError)
