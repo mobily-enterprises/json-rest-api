@@ -170,7 +170,10 @@ the many-row patches therefore keep such a link: a belongs-to (or polymorphic
 belongs-to) the write sets to null, whose stored target exists but is hidden
 from the writer, stays as stored, and the rest of the write applies. Linking
 a visible target, and clearing a link to a visible or missing target, apply as
-asked. Only a write that clears a link pays for the check: one read of the
+asked. A write that names a target is checked as before, even when it names
+the stored one: accepting a hidden target because it is unchanged would tell
+the writer which hidden record the link points to, since any other hidden id
+is refused. Only a write that clears a link pays for the check: one read of the
 targets' visibility, and one more of the hidden targets' existence. A
 many-row patch with such a row reads its rows first.
 
