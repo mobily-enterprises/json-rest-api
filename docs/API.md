@@ -1916,6 +1916,11 @@ const result = await api.resources.articles.query({
 });
 ```
 
+The text operators (`like`, `contains`, `startsWith`, `endsWith`) match the
+value as written on every database: `%`, `_` and `\` in it are ordinary
+characters, so `titleContains: '50%'` finds titles containing `50%`. A filter
+that needs LIKE patterns of its own uses `applyFilter`.
+
 #### Array Filters (IN operator)
 
 ```javascript

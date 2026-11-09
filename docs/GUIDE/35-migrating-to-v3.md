@@ -302,6 +302,14 @@ field NULL, also when an optional (`required: false`) filter does not resolve.
 | a `patch` or `put` of `accountId: null` by a writer who cannot see the account clears the link | keeps it; clear it in a system context |
 | `owner_type` and `owner_id` in attributes set a polymorphic link | refused; send `owner: { _type, id }` or `relationships.owner` |
 
+## Text filters match literally (3.1.2)
+
+`contains`, `startsWith` and `endsWith` filters, and search fields built on them,
+search for the value as written on every database: `%`, `_` and `\` match only
+themselves. Before, `%` and `_` (and on MySQL and PostgreSQL `\`) were LIKE
+pattern syntax, so `50%` also matched `500`. Use a search field with
+`applyFilter` for a real pattern.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

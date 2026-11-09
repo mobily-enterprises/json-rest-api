@@ -7,6 +7,12 @@ import { resolveSortField } from './query-field-sort-helpers.js'
 import { databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 
 const referenceVisibility = Symbol('referenceVisibility')
+// Text operators match the value as written. LIKE gives %, _ and its escape
+// character a meaning of their own, so each is escaped with a backslash that the
+// statement names as its escape character: SQLite has no default one, and
+// MySQL's and PostgreSQL's default backslash would otherwise read `a\b` as `ab`.
+const LIKE_ESCAPE = '\\'
+const escapeLikeText = text => text.replace(/[\\%_]/g, character => `${LIKE_ESCAPE}${character}`)
 // SQL never matches null against a non-null operand with these.
 const NULL_REJECTING_OPERATORS = new Set(['=', '==', '!=', '<>', '<', '<=', '>', '>=', 'in', 'between', 'like', 'contains', 'startswith', 'endswith'])
 
@@ -157,8 +163,6 @@ export function applyWhereForOperator ({ builder, columnRef, operator, value, kn
     })
     return
   }
-  const likeOp = 'like'
-
   const op = typeof operator === 'string' ? operator.toLowerCase() : operator
   const textSearch = ['like', 'contains', 'startswith', 'endswith'].includes(op)
 
@@ -186,7 +190,7 @@ export function applyWhereForOperator ({ builder, columnRef, operator, value, kn
     const textColumn = knex.client.config.client === 'pg' ? knex.raw('cast(?? as text)', [columnRef]) : columnRef
     const prefix = op === 'startswith' ? '' : '%'
     const suffix = op === 'endswith' ? '' : '%'
-    builder[method](textColumn, likeOp, `${prefix}${String(firstVal)}${suffix}`)
+    builder[or ? 'orWhereRaw' : 'whereRaw']('?? like ? escape ?', [textColumn, `${prefix}${escapeLikeText(String(firstVal))}${suffix}`, LIKE_ESCAPE])
     return
   }
 
