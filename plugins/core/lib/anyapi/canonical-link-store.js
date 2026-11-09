@@ -124,16 +124,20 @@ export function createCanonicalLinkStore ({ api, getDescriptor, getScopeStorageA
     return forward.union(reverse)
   }
 
+  // The parents' visible link targets, filtered by the target's scope. Without
+  // `parentIds` it is every visible target, for a statement that correlates it with
+  // each link row it reads (`whereVisibleTarget`).
   const buildVisibleLinkTargets = async ({ descriptor, relInfo, relationshipKey, parentIds, db, context }) => {
     const adapter = getScopeStorageAdapter(relInfo.target)
     if (!adapter) throw new RestApiResourceError(`Related resource '${relInfo.target}' not found`, { subtype: 'related_type_not_found' })
     const tableName = adapter.getTableName()
     const column = `${tableName}.${adapter.getIdColumn()}`
-    const links = buildRelatedLinkQuery({ descriptor, relInfo, relationshipKey, parentIds, db })
-    const query = adapter.buildBaseQuery({ transaction: context.transaction })
-      .whereIn(column, db.select('childId').from(links.as('related_identifiers')))
-      .distinct(column)
-    return applyScopeFiltersToIncludeQuery({
+    const query = adapter.buildBaseQuery({ transaction: context.transaction }).distinct(column)
+    if (parentIds) {
+      const links = buildRelatedLinkQuery({ descriptor, relInfo, relationshipKey, parentIds, db })
+      query.whereIn(column, db.select('childId').from(links.as('related_identifiers')))
+    }
+    const filtered = await applyScopeFiltersToIncludeQuery({
       query,
       scopes: api.resources,
       scopeName: relInfo.target,
@@ -142,7 +146,14 @@ export function createCanonicalLinkStore ({ api, getDescriptor, getScopeStorageA
       tableName,
       queryPurpose: 'relationship-identifiers'
     })
+    return { ...filtered, column }
   }
+
+  // Keeps link rows whose target (`linkColumn`, qualified) is visible. Each row's
+  // target is looked up by its unique ID, so a statement costs its own rows, however
+  // many parents the visible targets were read for.
+  const whereVisibleTarget = (query, visibleTargets, linkColumn, db) =>
+    query.whereExists(visibleTargets.query.clone().where(visibleTargets.column, db.ref(linkColumn)))
 
   /** @type {import('../storage/storage-types.js').CanonicalDataRelatedIdsQuery} */
   const dataRelatedIdsQuery = async ({ context, scopeName }) => {
@@ -189,7 +200,8 @@ export function createCanonicalLinkStore ({ api, getDescriptor, getScopeStorageA
       let afterId
       // One parent can have many links; bound returned rows as well as requested IDs.
       while (true) {
-        const query = db(LINKS_TABLE)
+        // Aliased so the visibility check names this statement's rows unambiguously.
+        const query = db({ parent_links: LINKS_TABLE })
           .where('tenant_id', descriptor.tenant)
           .andWhere((builder) => {
             builder
@@ -198,14 +210,14 @@ export function createCanonicalLinkStore ({ api, getDescriptor, getScopeStorageA
                   .andWhere('left_resource', descriptor.resource)
                   .andWhere('right_resource', targetResource)
                   .whereIn('left_id', batchIds)
-                if (visibleTargets) q.whereIn('right_id', visibleTargets.clone())
+                if (visibleTargets) whereVisibleTarget(q, visibleTargets, 'parent_links.right_id', db)
               })
               .orWhere((q) => {
                 q.where('inverse_relationship', relationshipKey)
                   .andWhere('right_resource', descriptor.resource)
                   .andWhere('left_resource', targetResource)
                   .whereIn('right_id', batchIds)
-                if (visibleTargets) q.whereIn('left_id', visibleTargets.clone())
+                if (visibleTargets) whereVisibleTarget(q, visibleTargets, 'parent_links.left_id', db)
               })
           })
           .select('id', 'relationship', 'inverse_relationship', 'left_resource', 'left_id', 'right_resource', 'right_id')

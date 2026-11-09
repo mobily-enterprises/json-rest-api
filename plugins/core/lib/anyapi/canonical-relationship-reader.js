@@ -565,7 +565,7 @@ export function createCanonicalRelationshipReader ({ api, knex, getDescriptor, g
       const parentIds = pendingResources.map(resource => resource.id)
       const info = getManyToManyInfo(descriptor.resource, relName)
       if (!info) continue
-      const { query: visibleTargets } = await buildVisibleLinkTargets({ ...info, parentIds, db, context })
+      const visibleTargets = await buildVisibleLinkTargets({ ...info, parentIds: null, db, context })
       const rows = await fetchLinksForParents({
         descriptor: info.descriptor,
         relationshipKey: info.relationshipKey,

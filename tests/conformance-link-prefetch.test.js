@@ -44,7 +44,7 @@ for (const direction of ['unpaired', 'forward', 'inverse']) {
             functionName: 'linkage-allocation-filter-builder',
             handler: ({ context, scopeName }) => {
               if (scopeName !== targetType || context.knexQuery?.queryPurpose !== 'relationship-identifiers' || !context.linkageProbe) return
-              context.linkageProbe.push({ auth: context.auth, transaction: context.transaction, filters: context.queryParams?.filters, linkQuery: context.knexQuery.query.toSQL().sql.includes('any_links') })
+              context.linkageProbe.push({ auth: context.auth, transaction: context.transaction, filters: context.queryParams?.filters })
               context.knexQuery.query = context.knexQuery.query.clone()
             }
           }
@@ -121,6 +121,7 @@ for (const direction of ['unpaired', 'forward', 'inverse']) {
     })
 
     it('filters linkage endpoint rows before returning them from storage', async () => {
+      const filterCalls = { getRelationship: [], listMany: [] }
       for (const hideAll of [false, true]) {
         for (const method of ['getRelationship', 'listMany']) {
           const linkageProbe = []
@@ -132,10 +133,13 @@ for (const direction of ['unpaired', 'forward', 'inverse']) {
           const actual = method === 'listMany' ? value : value.data
           assert.deepEqual(actual.map(row => row.id).sort(), expected.sort())
           assert.equal(reads.reduce((total, rows) => total + rows, 0), expected.length)
-          // The endpoint's parent GET also filters its other reverse relationships.
-          assert.equal(linkageProbe.filter(probe => probe.linkQuery).length, 1)
+          filterCalls[method].push(linkageProbe.length)
         }
       }
+      // Three pages of visible links or one empty page: the linkage filter is built
+      // once either way. The endpoint's parent GET also filters its other relationships.
+      for (const counts of Object.values(filterCalls)) assert.equal(counts[0], counts[1], JSON.stringify(filterCalls))
+      assert.deepEqual(filterCalls.listMany, [1, 1])
     })
 
     it('filters missing targets while preserving each caller\'s duplicate-edge behavior', async () => {
