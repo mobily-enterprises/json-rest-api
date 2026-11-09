@@ -2,7 +2,7 @@ import { spawn, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { openSync, closeSync } from 'node:fs'
 import { access, constants, mkdtemp, mkdir, readdir, readFile, rm, statfs } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { availableParallelism, tmpdir } from 'node:os'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import knexLib from 'knex'
@@ -18,6 +18,14 @@ if (storageModes.some(storage => !['knex', 'anyapi'].includes(storage))) {
 }
 if (clients.some(client => !['better-sqlite3', 'pg', 'mysql2', 'mariadb', 'redis'].includes(client))) {
   throw new Error('Usage: node scripts/test-databases.js [all|better-sqlite3|pg|mysql2|mariadb|redis] [test files...]')
+}
+// Test files run side by side, each in databases of its own: by default as many
+// as half the machine's CPUs, at least two, leaving the rest to the database server.
+const concurrency = process.env.JSON_REST_API_TEST_CONCURRENCY
+  ? Number(process.env.JSON_REST_API_TEST_CONCURRENCY)
+  : Math.max(2, Math.floor(availableParallelism() / 2))
+if (!Number.isInteger(concurrency) || concurrency < 1) {
+  throw new Error('JSON_REST_API_TEST_CONCURRENCY must be a positive integer')
 }
 // MariaDB speaks the MySQL protocol: its tests use the mysql2 client.
 const knexClient = client => client === 'mariadb' ? 'mysql2' : client
@@ -219,7 +227,7 @@ try {
           ...(client === 'redis' ? { JSON_REST_API_REDIS_CONNECTION: JSON.stringify(database.connection) } : {})
         }
         delete testEnv.NODE_TEST_CONTEXT
-        await run(process.execPath, ['--test', `--test-concurrency=${client === 'redis' ? 1 : 2}`, ...files], {
+        await run(process.execPath, ['--test', `--test-concurrency=${client === 'redis' ? 1 : concurrency}`, ...files], {
           env: testEnv
         }, requestedFiles.length ? 900000 : 1800000)
       }

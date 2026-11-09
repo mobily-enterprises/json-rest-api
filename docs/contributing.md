@@ -161,6 +161,10 @@ rechecking a backend-specific failure:
 JSON_REST_API_RUNNER_STORAGE=anyapi npm run test:databases:pg
 ```
 
+Test files run side by side, each in databases of its own: by default as many as
+half the machine's CPUs, and at least two. `JSON_REST_API_TEST_CONCURRENCY` sets
+the number; Redis files always run one at a time.
+
 A complete backend/storage selection has a 30-minute limit; explicitly selected
 test files retain a 15-minute limit. Both limits terminate the owned process group
 and dispose of the database. They do not retry tests or relax assertions.
