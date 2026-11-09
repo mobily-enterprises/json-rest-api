@@ -1,4 +1,4 @@
-import { hasKnexTableIndex, listKnexTableIndexes } from '../dbIntrospection.js'
+import { hasKnexTableIndex, listKnexTableColumns, listKnexTableIndexes } from '../dbIntrospection.js'
 
 // Default layout of any_records. The registry reads the actual columns, so a
 // migration that adds slots raises the limits for every server.
@@ -86,26 +86,39 @@ const tolerateConcurrentDdl = async (run, done) => {
   }
 }
 
-// Returns whether the table was missing, so its indexes can be built offline.
-const ensureTable = async (knex, tableName, tableBuilder) => {
-  if (await knex.schema.hasTable(tableName)) return false
-  await tolerateConcurrentDdl(() => knex.schema.createTable(tableName, tableBuilder), () => knex.schema.hasTable(tableName))
-  return true
-}
+const CANONICAL_TABLES = ['any_records', 'any_links', 'any_resource_configs', 'any_field_configs', 'any_relationship_configs']
 
-const ensureColumn = async (knex, tableName, columnName, columnBuilder) => {
-  const exists = await knex.schema.hasTable(tableName)
-  if (!exists) return
-
-  const hasColumn = () => knex.schema.hasColumn(tableName, columnName)
-  if (!await hasColumn()) {
-    await tolerateConcurrentDdl(() => knex.schema.table(tableName, columnBuilder), hasColumn)
+// The canonical tables' columns, read with one statement, and read again only
+// after a change to them: each check would otherwise be a catalog query.
+const canonicalLayout = knex => {
+  /** @type {Promise<Map<string, Map<string, number | null>>> | undefined} */
+  let reading
+  return {
+    /** @param {string} tableName */
+    columns: async tableName => (await (reading ||= listKnexTableColumns(knex, CANONICAL_TABLES))).get(tableName),
+    changed: () => { reading = undefined }
   }
 }
 
-const ensureUniqueIndex = async (knex, tableName, columns, indexName) => {
-  const exists = await knex.schema.hasTable(tableName)
-  if (!exists) return
+// Returns whether the table was missing, so its indexes can be built offline.
+const ensureTable = async (knex, layout, tableName, tableBuilder) => {
+  if (await layout.columns(tableName)) return false
+  try {
+    await tolerateConcurrentDdl(() => knex.schema.createTable(tableName, tableBuilder), () => knex.schema.hasTable(tableName))
+  } finally { layout.changed() }
+  return true
+}
+
+const ensureColumn = async (knex, layout, tableName, columnName, columnBuilder) => {
+  const columns = await layout.columns(tableName)
+  if (!columns || columns.has(columnName)) return
+  try {
+    await tolerateConcurrentDdl(() => knex.schema.table(tableName, columnBuilder), () => knex.schema.hasColumn(tableName, columnName))
+  } finally { layout.changed() }
+}
+
+const ensureUniqueIndex = async (knex, layout, tableName, columns, indexName) => {
+  if (!await layout.columns(tableName)) return
   const hasIndex = () => hasKnexTableIndex(knex, tableName, indexName)
   if (!await hasIndex()) {
     await tolerateConcurrentDdl(() => knex.schema.table(tableName, (table) => {
@@ -131,26 +144,35 @@ const ensureIndexes = async (knex, tableName, indexes, { online }) => {
     return indexes.filter(({ name }) => !existing.get(name)?.valid && !existing.get(name)?.building)
       .map(index => ({ ...index, invalid: existing.has(index.name) }))
   }
-  const build = async () => {
-    for (const { name, columns, invalid } of await missing()) {
-      const list = columns.map(() => '??').join(', ')
+  const columnList = columns => columns.map(() => '??').join(', ')
+  const build = async pending => {
+    if (mysql) {
+      // One statement adds them all: MySQL then reads the table once, not once per index.
+      await tolerateConcurrentDdl(
+        () => knex.raw(
+          `alter table ?? ${pending.map(({ columns }) => `add index ?? (${columnList(columns)})`).join(', ')}${online ? ', algorithm=inplace, lock=none' : ''}`,
+          [tableName, ...pending.flatMap(({ name, columns }) => [name, ...columns])]
+        ),
+        async () => {
+          const existing = await listKnexTableIndexes(knex, tableName)
+          return pending.every(({ name }) => existing.has(name))
+        }
+      )
+      return
+    }
+    for (const { name, columns, invalid } of pending) {
       if (invalid) await knex.raw(`drop index ${concurrently ? 'concurrently ' : ''}if exists ??`, [name])
-      if (mysql) {
-        await tolerateConcurrentDdl(
-          () => knex.raw(`alter table ?? add index ?? (${list})${online ? ', algorithm=inplace, lock=none' : ''}`, [tableName, name, ...columns]),
-          () => hasKnexTableIndex(knex, tableName, name)
-        )
-      } else {
-        await tolerateConcurrentDdl(
-          () => knex.raw(`create index ${concurrently ? 'concurrently ' : ''}if not exists ?? on ?? (${list})`, [name, tableName, ...columns]),
-          async () => (await listKnexTableIndexes(knex, tableName)).has(name)
-        )
-      }
+      await tolerateConcurrentDdl(
+        () => knex.raw(`create index ${concurrently ? 'concurrently ' : ''}if not exists ?? on ?? (${columnList(columns)})`, [name, tableName, ...columns]),
+        async () => (await listKnexTableIndexes(knex, tableName)).has(name)
+      )
     }
   }
-  if (!(await missing()).length) return
-  if (concurrently) await withPgIndexBuildLock(knex, tableName, build)
-  else await build()
+  const pending = await missing()
+  if (!pending.length) return
+  // Under the build lock, another server may have built some of them meanwhile.
+  if (concurrently) await withPgIndexBuildLock(knex, tableName, async () => build(await missing()))
+  else await build(pending)
 }
 
 // Concurrent builds on one table deadlock each other, so one server builds at a
@@ -185,7 +207,8 @@ const withPgIndexBuildLock = async (knex, tableName, build) => {
 export const ensureAnyApiSchema = async (knex, { slots, indexedSlots } = {}) => {
   const counts = resolveSlotCounts(slots)
   const indexedCounts = resolveSlotCounts(indexedSlots, INDEXED_SLOT_LIMITS, { label: 'indexed slot', minimum: 0 })
-  const created = await ensureTable(knex, 'any_records', (table) => {
+  const layout = canonicalLayout(knex)
+  const created = await ensureTable(knex, layout, 'any_records', (table) => {
     table.increments('id').primary()
     table.string('logical_id')
     table.string('tenant_id').notNullable()
@@ -202,37 +225,34 @@ export const ensureAnyApiSchema = async (knex, { slots, indexedSlots } = {}) => 
     table.index(['resource'])
   })
 
-  const readColumns = async () => new Set(Object.keys(await knex('any_records').columnInfo()))
-  let recordColumns = await readColumns()
+  let recordColumns = await layout.columns('any_records')
   const missing = layoutColumns(counts, indexedCounts).filter(column => !recordColumns.has(column))
   if (missing.length) {
-    await tolerateConcurrentDdl(
-      () => knex.schema.alterTable('any_records', (table) => missing.forEach(column => addSlotColumn(table, column))),
-      async () => {
-        const columns = await readColumns()
-        return missing.every(column => columns.has(column))
-      }
-    )
-    recordColumns = await readColumns()
+    try {
+      await tolerateConcurrentDdl(
+        () => knex.schema.alterTable('any_records', (table) => missing.forEach(column => addSlotColumn(table, column))),
+        async () => {
+          const columns = new Set(Object.keys(await knex('any_records').columnInfo()))
+          return missing.every(column => columns.has(column))
+        }
+      )
+    } finally { layout.changed() }
+    recordColumns = await layout.columns('any_records')
   }
 
-  const client = knex.client.config.client
-  if (['pg', 'postgresql', 'mysql', 'mysql2'].includes(client)) {
-    const columns = (await knex('information_schema.columns')
-      .select({ column: 'column_name', precision: 'datetime_precision' })
-      .where('table_schema', knex.raw(client === 'pg' || client === 'postgresql' ? 'current_schema()' : 'DATABASE()'))
-      .where('table_name', 'any_records'))
-      .filter(column => /^(indexed_)?date_\d+$/.test(column.column))
-    if (!columns.length || columns.some(column => Number(column.precision) !== 6)) {
+  if (['pg', 'postgresql', 'mysql', 'mysql2'].includes(knex.client.config.client)) {
+    const precisions = [...recordColumns].filter(([column]) => /^(indexed_)?date_\d+$/.test(column)).map(([, precision]) => precision)
+    if (!precisions.length || precisions.some(precision => precision !== 6)) {
       throw new Error('AnyAPI temporal storage migration required: every any_records date slot must use timestamp/datetime precision 6. See 33-migrating-to-v2.md.')
     }
   }
 
-  await ensureColumn(knex, 'any_records', 'logical_id', (table) => {
+  await ensureColumn(knex, layout, 'any_records', 'logical_id', (table) => {
     table.string('logical_id')
   })
   await ensureUniqueIndex(
     knex,
+    layout,
     'any_records',
     ['tenant_id', 'resource', 'logical_id'],
     'any_records_tenant_resource_logical_id_unique'
@@ -248,7 +268,7 @@ export const ensureAnyApiSchema = async (knex, { slots, indexedSlots } = {}) => 
       .update({ logical_id: String(row.id) })
   }
 
-  const linksCreated = await ensureTable(knex, 'any_links', (table) => {
+  const linksCreated = await ensureTable(knex, layout, 'any_links', (table) => {
     table.increments('id').primary()
     table.string('tenant_id').notNullable()
     table.string('relationship').notNullable()
@@ -271,7 +291,7 @@ export const ensureAnyApiSchema = async (knex, { slots, indexedSlots } = {}) => 
 
   // Filters on indexed fields, child lookups by parent id and link lookups by
   // record id all stay inside one tenant's rows.
-  const recordIndexes = [...recordColumns]
+  const recordIndexes = [...recordColumns.keys()]
     .filter(column => /^(indexed_[a-z]+_\d+|rel_\d+_id)$/.test(column))
     .map(column => ({ name: slotIndexName(column), columns: ['tenant_id', 'resource', column] }))
   await ensureIndexes(knex, 'any_records', recordIndexes, { online: !created })
@@ -280,7 +300,7 @@ export const ensureAnyApiSchema = async (knex, { slots, indexedSlots } = {}) => 
     { name: 'any_links_tenant_right_id_idx', columns: ['tenant_id', 'right_id'] }
   ], { online: !linksCreated })
 
-  await ensureTable(knex, 'any_resource_configs', (table) => {
+  await ensureTable(knex, layout, 'any_resource_configs', (table) => {
     table.increments('id').primary()
     table.string('tenant_id').notNullable()
     table.string('resource').notNullable()
@@ -294,14 +314,14 @@ export const ensureAnyApiSchema = async (knex, { slots, indexedSlots } = {}) => 
 
     table.unique(['tenant_id', 'resource'])
   })
-  await ensureColumn(knex, 'any_resource_configs', 'definition_json', (table) => {
+  await ensureColumn(knex, layout, 'any_resource_configs', 'definition_json', (table) => {
     table.text('definition_json', 'longtext')
   })
-  await ensureColumn(knex, 'any_resource_configs', 'schema_version', (table) => {
+  await ensureColumn(knex, layout, 'any_resource_configs', 'schema_version', (table) => {
     table.integer('schema_version').notNullable().defaultTo(1)
   })
 
-  await ensureTable(knex, 'any_field_configs', (table) => {
+  await ensureTable(knex, layout, 'any_field_configs', (table) => {
     table.increments('id').primary()
     table.integer('resource_config_id').unsigned().notNullable()
       .references('id').inTable('any_resource_configs').onDelete('CASCADE')
@@ -330,10 +350,10 @@ export const ensureAnyApiSchema = async (knex, { slots, indexedSlots } = {}) => 
     if (shared) {
       throw new Error(`AnyAPI slot metadata repair required: several fields of resource config ${shared.resource_config_id} share ${shared.slot_column}. Reassign them before upgrading.`)
     }
-    await ensureUniqueIndex(knex, 'any_field_configs', ['resource_config_id', 'slot_column'], 'any_field_configs_resource_slot_unique')
+    await ensureUniqueIndex(knex, layout, 'any_field_configs', ['resource_config_id', 'slot_column'], 'any_field_configs_resource_slot_unique')
   }
 
-  await ensureTable(knex, 'any_relationship_configs', (table) => {
+  await ensureTable(knex, layout, 'any_relationship_configs', (table) => {
     table.increments('id').primary()
     table.integer('resource_config_id').unsigned().notNullable()
       .references('id').inTable('any_resource_configs').onDelete('CASCADE')

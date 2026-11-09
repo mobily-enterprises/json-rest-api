@@ -1232,6 +1232,36 @@ async function introspectPostgresTableSnapshot (knex, { tableName, idColumn }) {
   }
 }
 
+/**
+ * The columns of the named tables in the current schema, with one statement: each
+ * existing table maps its column names to their datetime precision (null on SQLite).
+ * @param {any} knex
+ * @param {string[]} tableNames
+ * @returns {Promise<Map<string, Map<string, number | null>>>}
+ */
+export async function listKnexTableColumns (knex, tableNames) {
+  const client = knex.client.config.client
+  let rows
+  if (['sqlite3', 'better-sqlite3'].includes(client)) {
+    rows = normalizeRows(await knex.raw(`select m.name as "table", p.name as "column", null as "precision"
+      from sqlite_master m join pragma_table_info(m.name) p
+      where m.type = 'table' and m.name in (${tableNames.map(() => '?').join(', ')})`, tableNames))
+  } else if (['mysql', 'mysql2', 'pg', 'postgresql'].includes(client)) {
+    rows = await knex('information_schema.columns')
+      .select({ table: 'table_name', column: 'column_name', precision: 'datetime_precision' })
+      .where('table_schema', knex.raw(['pg', 'postgresql'].includes(client) ? 'current_schema()' : 'database()'))
+      .whereIn('table_name', tableNames)
+  } else {
+    throw new Error(`Unsupported knex client '${client}' for listKnexTableColumns`)
+  }
+  const tables = new Map()
+  for (const { table, column, precision } of rows) {
+    if (!tables.has(table)) tables.set(table, new Map())
+    tables.get(table).set(column, precision === null || precision === undefined ? null : Number(precision))
+  }
+  return tables
+}
+
 export async function hasKnexTableIndex (knex, tableName, indexName) {
   const client = knex.client.config.client
   if (['sqlite3', 'better-sqlite3'].includes(client)) {
