@@ -99,7 +99,7 @@
   "description": "JSON:API mini-ORM with resource hooks and pluggable storage",
   "dependencies": {
     "content-type": "^1.0.5",
-    "json-rest-schema": "^1.0.17",
+    "json-rest-schema": "^1.0.20",
     "on-headers": "^1.1.0",
     "vary": "^1.1.2"
   },
