@@ -1987,8 +1987,11 @@ export async function closeWebSocketApi (api, server) {
   const cleanup = async action => {
     try { await action() } catch (error) { errors.push(error) }
   }
+  // close() disconnects every socket and drops its connection at once. Disconnecting
+  // the sockets first would close each connection politely instead, and a polling
+  // client that has stopped polling keeps such a connection, and the process, alive
+  // for engine.io's 30-second close timeout.
   if (api?.vars.socketIO) {
-    await cleanup(() => api.vars.socketIO.disconnectSockets(true))
     await cleanup(async () => {
       await new Promise((resolve, reject) => {
         api.vars.socketIO.close(error => {
