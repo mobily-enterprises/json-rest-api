@@ -81,7 +81,7 @@ const insertMissingPivotRecords = async (trx, { tableName, idColumn, foreignKey,
     const batch = ids.slice(offset, offset + RELATIONSHIP_WRITE_BATCH_SIZE)
     const requestedIds = new Set(batch)
     const existingIds = new Set()
-    let hasExisting = false
+    let respelled = false
     let afterId
     // A pivot resource can contain duplicate edges; bound returned rows as well as IDs.
     while (true) {
@@ -90,10 +90,10 @@ const insertMissingPivotRecords = async (trx, { tableName, idColumn, foreignKey,
         .select({ [idColumn]: databaseIdentityExpression(trx, idColumn), [otherKey]: databaseIdentityExpression(trx, otherKey) })
       if (afterId !== undefined) query.where(idColumn, '>', afterId)
       const existing = await applyDatabaseReadOptions(query)
-      hasExisting ||= existing.length > 0
       for (const record of existing) {
         const id = String(record[otherKey])
         if (requestedIds.has(id)) existingIds.add(id)
+        else respelled = true
       }
       if (existing.length <= RELATIONSHIP_WRITE_BATCH_SIZE) break
       afterId = existing.at(-1)[idColumn]
@@ -101,8 +101,10 @@ const insertMissingPivotRecords = async (trx, { tableName, idColumn, foreignKey,
     const toAdd = []
     for (const id of batch) {
       if (existingIds.has(id)) continue
-      // A returned spelling can match another requested ID under the column's collation.
-      if (hasExisting && await trx(tableName).where(foreignKey, resourceId).where(otherKey, id).forUpdate().first(otherKey)) continue
+      // The requested IDs are distinct database identities, so only a stored row
+      // that matched none of them as written can be another ID's spelling under
+      // the column's collation; without one, every other ID is new.
+      if (respelled && await trx(tableName).where(foreignKey, resourceId).where(otherKey, id).forUpdate().first(otherKey)) continue
       toAdd.push({ [foreignKey]: resourceId, [otherKey]: id })
     }
     if (toAdd.length) await trx(tableName).insert(toAdd)

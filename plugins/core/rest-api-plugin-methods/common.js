@@ -28,6 +28,7 @@ import { databaseFamily } from '../lib/querying-writing/database-capabilities.js
 import { isSystemContext } from '../../../lib/system-context.js'
 import { findRelationshipDefinition } from '../lib/querying-writing/relationship-contracts.js'
 import { getResourceFieldset, parseFieldset } from '../lib/querying-writing/field-utils.js'
+import { sharedTargetChecks, targetKey } from '../lib/writing/relationship-processor.js'
 
 // A trusted connector callback, evaluated after normal write validation and authorization.
 export const writePrecondition = Symbol('writePrecondition')
@@ -424,6 +425,10 @@ export const collectRelationshipTargets = (inputRecord, api, unique) => {
  * @param {LifecycleApi} api
  */
 export const validateRelationshipTargets = async (context, targets, helpers, api) => {
+  // The child writes of one reverse relationship write share one parent: the
+  // first checks it, the others reuse that check.
+  const checks = sharedTargetChecks(context)
+  if (checks) targets = targets.filter(item => !checks.visible.has(targetKey(item.type, item.id)))
   /** @type {Map<string, Identifier[]>} */
   const byType = new Map()
   for (const item of targets) {
@@ -477,6 +482,7 @@ export const validateRelationshipTargets = async (context, targets, helpers, api
       originalContext: { ...lookup.context, id: item.id, minimalRecord: record }
     })
   }
+  if (checks) for (const item of targets) checks.visible.add(targetKey(item.type, item.id))
 }
 
 /** @param {Pick<LifecycleArguments, 'helpers' | 'scopeName' | 'runHooks'> & { context: IdentityContext }} options */

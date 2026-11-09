@@ -247,11 +247,13 @@ export function createCanonicalLinkStore ({ api, getDescriptor, getScopeStorageA
     if (relArray.length === 0) return
     assertVersionedRelationshipTransaction(api, relInfo, db)
 
-    await lockRelationshipTargets(api, db, relArray.map(identifier => ({ type: relInfo.target, id: identifier.id })), {
+    // The lock answers each database identity once, so the IDs below are distinct
+    // under the ID column's collation.
+    const targets = await lockRelationshipTargets(api, db, relArray.map(identifier => ({ type: relInfo.target, id: identifier.id })), {
       exclusive: hasVersionedInverse(api, relInfo)
     })
 
-    const ids = [...new Set(relArray.map(identifier => normalizeId(identifier.id)).filter(id => id !== null))]
+    const ids = [...new Set(targets.map(identifier => normalizeId(identifier.id)).filter(id => id !== null))]
     const readLinks = batchIds => buildLinkMutationQuery(options, (query, column) => query.whereIn(column, batchIds))
       .select('id', 'left_id', 'right_id', 'inverse_relationship', db.raw(
         'case when ?? = ? and ?? = ? and ?? = ? then 1 else 0 end as ??',
@@ -261,26 +263,27 @@ export function createCanonicalLinkStore ({ api, getDescriptor, getScopeStorageA
       const batch = ids.slice(offset, offset + RELATIONSHIP_WRITE_BATCH_SIZE)
       const requested = new Set(batch)
       const existingById = new Map()
-      let hasExistingRows = false
+      let respelled = false
       let afterId
       // Duplicate stored edges must not turn a bounded target batch into an unbounded read.
       while (true) {
         const query = readLinks(batch).limit(RELATIONSHIP_READ_BATCH_SIZE + 1)
         if (afterId !== undefined) query.where('id', '>', afterId)
         const rows = await query
-        hasExistingRows ||= rows.length > 0
         for (const row of rows) {
           const targetId = normalizeId(row.owner_left ? row.right_id : row.left_id)
-          if (requested.has(targetId) && !existingById.has(targetId)) existingById.set(targetId, row)
+          if (!requested.has(targetId)) respelled = true
+          else if (!existingById.has(targetId)) existingById.set(targetId, row)
         }
         if (rows.length <= RELATIONSHIP_READ_BATCH_SIZE) break
         afterId = rows.at(-1).id
       }
-      let inserted = false
+      const inserts = []
       for (const rightId of batch) {
         let existing = existingById.get(rightId)
-        // Unmatched spellings can equal another existing/new ID under the database collation.
-        if (!existing && (hasExistingRows || inserted)) {
+        // Only a stored link that matched no requested ID as written can hold
+        // another spelling of one under the column's collation.
+        if (!existing && respelled) {
           existing = await readLinks([rightId]).first()
         }
         if (existing) {
@@ -303,14 +306,9 @@ export function createCanonicalLinkStore ({ api, getDescriptor, getScopeStorageA
           rightId,
         })
         if (!canonical) continue
-        await db(LINKS_TABLE).insert({
-          ...canonical,
-          payload: null,
-          created_at: db.fn.now(),
-          updated_at: db.fn.now(),
-        })
-        inserted = true
+        inserts.push({ ...canonical, payload: null, created_at: db.fn.now(), updated_at: db.fn.now() })
       }
+      if (inserts.length) await db(LINKS_TABLE).insert(inserts)
     }
     await invalidateManyToManyVersions(api, relInfo, ids, db)
   }

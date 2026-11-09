@@ -28,6 +28,20 @@ const lockTargetRows = (query, { exclusive, keyShare }, db) => exclusive
   ? query.forUpdate()
   : keyShare && databaseFamily(db) === 'pg' ? query.forKeyShare() : query.forShare()
 
+// Shared by the child writes of one reverse relationship write, which all name
+// the same parent: { visible: Set, locked: Map } of `type\0id` keys the
+// transaction has already checked or locked, so each target is read once.
+export const relationshipTargetChecks = Symbol('relationshipTargetChecks')
+/** @typedef {{ visible: Set<string>, locked: Map<string, { strength: number, storedId: string }> }} RelationshipTargetChecks */
+/**
+ * The checks a context shares with the other child writes of its reverse relationship write, if any.
+ * @param {object} context
+ * @returns {RelationshipTargetChecks | undefined}
+ */
+export const sharedTargetChecks = context => /** @type {any} */ (context)[relationshipTargetChecks]
+export const targetKey = (type, id) => `${type}\u0000${String(id)}`
+const lockStrength = ({ exclusive, keyShare }) => exclusive ? 3 : keyShare ? 1 : 2
+
 /**
  * Lock referenced rows and fail when one no longer exists.
  * Targets are share-locked so writers referencing one row do not queue behind
@@ -37,11 +51,12 @@ const lockTargetRows = (query, { exclusive, keyShare }, db) => exclusive
  * @param {any} api
  * @param {any} transaction
  * @param {Array<{ type: string, id: string }>} identifiers
- * @param {{ exclusive?: boolean | Set<string>, keyShare?: boolean }} [options] - Lock every target, or targets of
- *   these types, for update; keyShare: the targets are to-one parents, whose shared lock is FOR KEY SHARE on PostgreSQL
+ * @param {{ exclusive?: boolean | Set<string>, keyShare?: boolean, checks?: { locked: Map<string, { strength: number, storedId: string }> } }} [options] - Lock every target, or targets of
+ *   these types, for update; keyShare: the targets are to-one parents, whose shared lock is FOR KEY SHARE on PostgreSQL;
+ *   checks: targets this transaction already holds at least as strongly, which are not read again
  * @returns {Promise<Array<{ type: string, id: string }>>} Each database identity once, in its first submitted spelling
  */
-export const lockRelationshipTargets = async (api, transaction, identifiers, { exclusive = false, keyShare = false } = {}) => {
+export const lockRelationshipTargets = async (api, transaction, identifiers, { exclusive = false, keyShare = false, checks } = {}) => {
   if (!transaction) return identifiers
   const isExclusive = type => exclusive instanceof Set ? exclusive.has(type) : exclusive
   const targets = []
@@ -53,25 +68,28 @@ export const lockRelationshipTargets = async (api, transaction, identifiers, { e
     const value = adapter.translateFilterValue('id', id)
     if (seen.has(String(value))) continue
     seen.add(String(value))
-    const target = { type, id, value, adapter }
+    const strength = lockStrength({ exclusive: isExclusive(type), keyShare })
+    const held = checks?.locked.get(targetKey(type, value))
+    const target = { type, id, value, adapter, strength, storedId: held && held.strength >= strength ? held.storedId : undefined }
     targets.push(target)
-    group.push(target)
+    if (target.storedId === undefined) group.push(target)
   }
   // One statement per target type at any count; whereInIdentifiers binds a long
   // id list as one parameter where the database limits parameters. Types lock
   // in name order and each statement in id order, so two writers naming the same
   // targets in different orders take their locks in the same order.
   for (const [type, { adapter, group, found }] of [...resources].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) {
+    if (!group.length) continue
     const idColumn = adapter.getIdColumn()
     const rows = await applyDatabaseReadOptions(lockTargetRows(adapter.buildBaseQuery({ transaction })
       .modify(whereInIdentifiers, idColumn, group.map(target => target.value))
       .orderBy(`${adapter.getTableName()}.${idColumn}`), { exclusive: isExclusive(type), keyShare }, transaction).select({ [idColumn]: databaseIdentityExpression(transaction, idColumn) }))
     for (const row of rows) found.add(String(row[idColumn]))
   }
-  for (const { type, id, value, adapter } of targets) {
-    let storedId = String(value)
+  for (const { type, id, value, adapter, strength, storedId: heldId } of targets) {
+    let storedId = heldId ?? String(value)
     // Let the database resolve alternate spellings under its column collation.
-    if (!resources.get(type).found.has(storedId)) {
+    if (heldId === undefined && !resources.get(type).found.has(storedId)) {
       const record = await applyDatabaseReadOptions(lockTargetRows(adapter.buildBaseQuery({ transaction })
         .where(adapter.getIdColumn(), value), { exclusive: isExclusive(type), keyShare }, transaction).first({ [adapter.getIdColumn()]: databaseIdentityExpression(transaction, adapter.getIdColumn()) }))
       if (!record) {
@@ -81,6 +99,7 @@ export const lockRelationshipTargets = async (api, transaction, identifiers, { e
       }
       storedId = String(record[adapter.getIdColumn()])
     }
+    if (checks && heldId === undefined) checks.locked.set(targetKey(type, value), { strength, storedId })
     const identities = resources.get(type).resolved
     if (!identities.has(storedId)) {
       identities.add(storedId)

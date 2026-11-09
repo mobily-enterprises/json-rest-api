@@ -2,7 +2,7 @@ import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 import { RELATIONSHIP_WRITE_BATCH_SIZE } from '../querying-writing/knex-constants.js'
 import { whereInIdentifiers } from '../querying/identifier-query.js'
-import { lockRelationshipTargets } from './relationship-processor.js'
+import { lockRelationshipTargets, relationshipTargetChecks } from './relationship-processor.js'
 
 // Read membership in bounded batches; each actual child write still goes through PATCH.
 export async function updateReverseRelationship ({ api, helpers, context, scopeName, relDef, relData, operation = 'replace' }) {
@@ -51,6 +51,8 @@ export async function updateReverseRelationship ({ api, helpers, context, scopeN
     if (!requested.has(String(value))) requested.set(String(value), { id: String(id), value })
   }
   const requestedIds = [...requested.values()]
+  // Every linked child names this parent: it is checked and locked once.
+  const checks = { visible: new Set(), locked: new Map() }
 
   const patchChild = async (id, linked) => {
     const data = { type: targetType, id }
@@ -62,7 +64,7 @@ export async function updateReverseRelationship ({ api, helpers, context, scopeN
     try {
       await targetScope.patch({
         id, document: { data }, transaction: context.transaction, format: 'jsonapi', returning: 'none'
-      }, { ...context })
+      }, { ...context, [relationshipTargetChecks]: checks })
     } catch (error) {
       if (!linked && operation === 'replace' && error.code === 'REST_API_RESOURCE' && ['not_found', 'forbidden'].includes(error.subtype)) {
         const rejection = new RestApiResourceError('Cannot replace a relationship with inaccessible existing members', { subtype: 'forbidden' })
@@ -92,10 +94,15 @@ export async function updateReverseRelationship ({ api, helpers, context, scopeN
     const batch = requestedIds.slice(offset, offset + RELATIONSHIP_WRITE_BATCH_SIZE)
     const rows = await applyDatabaseReadOptions(query.clone().whereIn(idColumn, batch.map(({ value }) => value)).select(selection))
     const existing = new Map(rows.map(row => [String(row[idColumn]), row]))
+    // Only a returned row that matched no requested ID as written can be another
+    // spelling of one under the column's collation; look IDs up one at a time
+    // only then.
+    const written = new Set(batch.map(({ value }) => String(value)))
+    const respelled = rows.some(row => !written.has(String(row[idColumn])))
     for (const { id, value } of batch) {
       // Resolve alternate ID spellings using the database's equality rules.
       let record = existing.get(String(value))
-      if (!record && existing.size) {
+      if (!record && respelled && existing.size) {
         const lookup = query.clone().where(idColumn, value).first(selection)
         record = await applyDatabaseReadOptions(lookup)
       }

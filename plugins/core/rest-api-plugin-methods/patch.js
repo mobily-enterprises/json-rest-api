@@ -4,7 +4,7 @@
  * } from './lifecycle-types.js' */
 import { applyResourceVersion, captureInverseVersions, inverseVersionTypes, invalidateInverseVersions } from '../lib/writing/resource-version.js'
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
-import { lockRelationshipParent, lockRelationshipTargets, processRelationships } from '../lib/writing/relationship-processor.js'
+import { lockRelationshipParent, lockRelationshipTargets, processRelationships, sharedTargetChecks } from '../lib/writing/relationship-processor.js'
 import { updateReverseRelationship } from '../lib/writing/reverse-relationship-manipulations.js'
 import { updateManyToManyRelationship } from '../lib/writing/many-to-many-manipulations.js'
 import { ERROR_SUBTYPES } from '../lib/querying-writing/knex-constants.js'
@@ -113,7 +113,7 @@ export default async function patchMethod ({
 
     // A parent whose revision this write advances is updated, not just referenced.
     await lockRelationshipTargets(api, context.transaction, belongsToTargets, {
-      exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo), keyShare: true
+      exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo), keyShare: true, checks: sharedTargetChecks(context)
     })
 
     if (manyToManyRelationships.length || reverseRelationships.length) {
