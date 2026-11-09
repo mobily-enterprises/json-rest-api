@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { assertWriteFailure } from './helpers/test-utils.js'
 import { RestApiResourceError, RestApiValidationError } from '../lib/rest-api-errors.js'
 import { createConformanceFixture } from './fixtures/conformance.js'
-import { createIdConformanceApi, seedStorageAdapterRecords, seedUnqueriedIdConformanceApi } from './fixtures/api-configs.js'
+import { analyzeSeededTables, createIdConformanceApi, seedStorageAdapterRecords, seedUnqueriedIdConformanceApi } from './fixtures/api-configs.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { databaseClient } from './helpers/test-database.js'
 import { groupByPolymorphicType } from '../plugins/core/lib/querying/include-query-helpers.js'
@@ -87,6 +87,7 @@ for (const kind of ['belongsTo', 'polymorphic']) {
     after(async () => { await fixture?.close() })
     it('loads all 33,000 children and visible targets without exceeding SQL parameter limits', async () => {
       await seedTree(fixture, kind, 33000)
+      await analyzeSeededTables(fixture.knex)
       const includeProbe = probe()
       const result = await read(fixture, kind, {}, { hideRows: true, includeProbe })
       const children = result.included.filter(row => row.type === 'items')

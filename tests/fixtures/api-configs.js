@@ -1199,6 +1199,14 @@ export async function seedStorageAdapterRecords (knex, schemaInfo, records) {
   await knex(adapter.getTableName()).insert(rows)
 }
 
+// PostgreSQL plans from table statistics, and a table created empty keeps an
+// estimate of no rows until autovacuum analyzes it. A test that seeds thousands
+// of rows and reads them at once refreshes the statistics, so that its reads are
+// not planned as reads of a handful of rows.
+export async function analyzeSeededTables (knex) {
+  if (knex.client.config.client === 'pg') await knex.raw('analyze')
+}
+
 export async function seedUnqueriedIdConformanceApi (knex, api, ids = ['0', '1']) {
   const insert = (type, id, attributes) => seedStorageAdapterRecords(knex, api.resources[type].vars.schemaInfo, [{ id, ...attributes }])
   for (const id of ids) {

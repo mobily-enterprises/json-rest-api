@@ -1,7 +1,7 @@
 import { after, before, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createConformanceFixture } from './fixtures/conformance.js'
-import { createIdConformanceApi, seedStorageAdapterRecords } from './fixtures/api-configs.js'
+import { analyzeSeededTables, createIdConformanceApi, seedStorageAdapterRecords } from './fixtures/api-configs.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { createStorageAdapter } from '../plugins/core/lib/storage/storage-adapter.js'
 import { whereInIdentifiers } from '../plugins/core/lib/querying/identifier-query.js'
@@ -118,6 +118,7 @@ describe(`Large nested collection ID lists (${storageMode.mode})`, () => {
     }
     const special = ['1', '100', '101', '200', '33000']
     await seed(fixture, 'items', special.map((id, index) => ({ id: String(size + index + 1), name: `Mention ${id}`, groupId: null, subjectType: 'groups', subjectId: id, active: true, score: 0 })))
+    await analyzeSeededTables(fixture.knex)
     for (const id of special) await fixture.api.resources.items.postRelationship({ id, relationshipName: 'groups', relationshipData: [{ type: 'groups', id }], returning: 'none' })
     const result = await fixture.api.resources.groups.get({ id: rootId, queryParams: { include: ['mentions.group.items', 'mentions.group.firstItem', 'mentions.group.mentions', 'mentions.group.members'] } })
     assert.equal(result.data.relationships.mentions.data.length, size)

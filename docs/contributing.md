@@ -132,7 +132,10 @@ node scripts/test-databases.js mysql2 scripts/stress-resources.js
 ## Real databases and Redis
 
 The database runner starts disposable servers and creates isolated test databases.
-Supply PostgreSQL's `initdb`/`postgres` and MySQL's `mysqld`, then run:
+The servers never wait for a disk flush, and keep their data in `/dev/shm` when it
+has 2 GiB free (otherwise, and in a run with MySQL, whose system `mysqld` profile
+may refuse `/dev/shm`, in the temporary directory); nothing they hold outlives
+the run. Supply PostgreSQL's `initdb`/`postgres` and MySQL's `mysqld`, then run:
 
 ```sh
 npm run test:databases:pg

@@ -1,7 +1,7 @@
 import { spawn, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { openSync, closeSync } from 'node:fs'
-import { mkdtemp, mkdir, readdir, readFile, rm } from 'node:fs/promises'
+import { access, constants, mkdtemp, mkdir, readdir, readFile, rm, statfs } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -132,6 +132,28 @@ async function startRedis (directory) {
   throw new Error(`Redis did not become ready: ${lastError?.message}`)
 }
 
+// The servers are disposable, so none of them waits for a disk flush: a commit, a
+// CREATE DATABASE or a CREATE TABLE costs its own work, not the disk's latency.
+// Isolation, locking and constraints are unchanged. Their data goes to a memory
+// file system when one has room for it, since MariaDB still flushes its DDL log
+// and new table files to disk; not in a run with MySQL, whose system mysqld runs
+// under a profile (AppArmor on Ubuntu) that refuses it /dev/shm.
+const MEMORY_DIRECTORY = '/dev/shm'
+const MEMORY_ROOM = 2 * 1024 ** 3
+const disposableParent = async () => {
+  if (clients.includes('mysql2')) return tmpdir()
+  try {
+    const { bavail, bsize } = await statfs(MEMORY_DIRECTORY)
+    await access(MEMORY_DIRECTORY, constants.W_OK)
+    if (bavail * bsize >= MEMORY_ROOM) return MEMORY_DIRECTORY
+  } catch {}
+  return tmpdir()
+}
+const NO_FLUSH = {
+  pg: ['-c', 'fsync=off', '-c', 'synchronous_commit=off', '-c', 'full_page_writes=off'],
+  mysql: ['--skip-log-bin', '--innodb-flush-log-at-trx-commit=0', '--innodb-doublewrite=OFF', '--innodb-flush-method=nosync']
+}
+
 async function startDatabase (client, directory) {
   if (client === 'redis') return startRedis(directory)
   await mkdir(directory, { mode: 0o700 })
@@ -141,7 +163,7 @@ async function startDatabase (client, directory) {
   if (client === 'pg') {
     const bin = process.env.JSON_REST_API_POSTGRES_BIN || (await exec('pg_config', ['--bindir'], { timeout: 5000 })).stdout.trim()
     await run(path.join(bin, 'initdb'), ['-D', data, '--username=jra_test', '--auth-local=trust', '--auth-host=reject', '--encoding=UTF8', '--locale=C', '--no-instructions'], { log })
-    server = launch(path.join(bin, 'postgres'), ['-D', data, '-k', directory, '-c', 'listen_addresses=', '-c', 'unix_socket_permissions=0700'], { log })
+    server = launch(path.join(bin, 'postgres'), ['-D', data, '-k', directory, '-c', 'listen_addresses=', '-c', 'unix_socket_permissions=0700', ...NO_FLUSH.pg], { log })
     connection = { host: directory, user: 'jra_test', database: 'postgres', connectionTimeoutMillis: 1000 }
   } else if (client === 'mariadb') {
     // An unpacked MariaDB release: JSON_REST_API_MARIADB_BASE holds bin/mariadbd and scripts/mariadb-install-db.
@@ -149,13 +171,13 @@ async function startDatabase (client, directory) {
     if (!base) throw new Error('MariaDB verification needs JSON_REST_API_MARIADB_BASE (an unpacked MariaDB release)')
     await run(path.join(base, 'scripts', 'mariadb-install-db'), ['--no-defaults', `--basedir=${base}`, `--datadir=${data}`, '--auth-root-authentication-method=normal', '--skip-test-db'], { log })
     const socketPath = path.join(directory, 'mysql.sock')
-    server = launch(path.join(base, 'bin', 'mariadbd'), ['--no-defaults', `--basedir=${base}`, `--datadir=${data}`, `--socket=${socketPath}`, `--pid-file=${path.join(directory, 'mysql.pid')}`, '--skip-networking', '--default-time-zone=+00:00'], { log })
+    server = launch(path.join(base, 'bin', 'mariadbd'), ['--no-defaults', `--basedir=${base}`, `--datadir=${data}`, `--socket=${socketPath}`, `--pid-file=${path.join(directory, 'mysql.pid')}`, '--skip-networking', '--default-time-zone=+00:00', ...NO_FLUSH.mysql], { log })
     connection = { socketPath, user: 'root', connectTimeout: 1000, timezone: 'Z' }
   } else {
     const binary = process.env.JSON_REST_API_MYSQL_BIN || 'mysqld'
     await run(binary, ['--no-defaults', '--initialize-insecure', `--datadir=${data}`], { log })
     const socketPath = path.join(directory, 'mysql.sock')
-    server = launch(binary, ['--no-defaults', `--datadir=${data}`, `--socket=${socketPath}`, `--pid-file=${path.join(directory, 'mysql.pid')}`, '--secure-file-priv=NULL', '--skip-networking', '--mysqlx=OFF', '--default-time-zone=+00:00'], { log })
+    server = launch(binary, ['--no-defaults', `--datadir=${data}`, `--socket=${socketPath}`, `--pid-file=${path.join(directory, 'mysql.pid')}`, '--secure-file-priv=NULL', '--skip-networking', '--mysqlx=OFF', '--default-time-zone=+00:00', ...NO_FLUSH.mysql], { log })
     connection = { socketPath, user: 'root', connectTimeout: 1000, timezone: 'Z' }
   }
 
@@ -181,7 +203,7 @@ async function startDatabase (client, directory) {
 }
 
 try {
-  temporaryRoot = await mkdtemp(path.join(tmpdir(), 'jra-db-'))
+  temporaryRoot = await mkdtemp(path.join(await disposableParent(), 'jra-db-'))
   console.log(`Disposable database directory: ${temporaryRoot}`)
   for (const client of clients) {
     let database
