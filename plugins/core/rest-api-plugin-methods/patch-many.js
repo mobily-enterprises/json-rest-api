@@ -217,7 +217,16 @@ async function runPatchMany (args, { operation, entries, started = false, select
   await runHooks('afterDataCallPatchMany')
 
   const response = await manyRowResponse({
-    api, scopeName, context, ids: context.ids, returning: context.returning, format: context.format, queryParams: params.queryParams
+    api,
+    scopeName,
+    context,
+    ids: context.ids,
+    returning: context.returning,
+    format: context.format,
+    queryParams: params.queryParams,
+    // The rows are locked by their UPDATE, which leaves a row whose stored values
+    // it repeats as it is, so a plain read could answer an older snapshot.
+    locked: true
   })
   await commitOwnedTransaction(context)
   return response

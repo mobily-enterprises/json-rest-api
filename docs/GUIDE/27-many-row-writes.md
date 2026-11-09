@@ -63,7 +63,9 @@ console.log(created.data, restocked.data)
 
 Rows come back in input order. Many-row writes return nothing unless you ask:
 `returning: 'minimal'` gives identifiers, `returning: 'full'` the records,
-read back in the write's transaction, and `returning: 'count'` only
+read back in the write's transaction (on MySQL and MariaDB a patch's with a
+locking read, so a row whose stored values it repeated reads as stored, not as
+the transaction's first snapshot saw it), and `returning: 'count'` only
 `{ meta: { count } }`, the number of rows written, without reading any back.
 The second call is an upsert: Alpha's ISBN already exists, so its stock
 becomes 9, and Gamma is inserted.

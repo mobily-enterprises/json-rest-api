@@ -29,6 +29,7 @@ import { isSystemContext } from '../../../lib/system-context.js'
 import { findRelationshipDefinition } from '../lib/querying-writing/relationship-contracts.js'
 import { getResourceFieldset, parseFieldset } from '../lib/querying-writing/field-utils.js'
 import { lockRelationshipTargets, sharedTargetChecks, targetKey } from '../lib/writing/relationship-processor.js'
+import { queryConstraint } from '../lib/querying/query-constraint.js'
 
 // A trusted connector callback, evaluated after normal write validation and authorization.
 export const writePrecondition = Symbol('writePrecondition')
@@ -623,10 +624,16 @@ export async function handleRecordReturnAfterWrite ({ context, scopeName, api, s
   const hookSuffix = getMethodHookSuffix(context.method)
   if (context.minimalRecord) context.originalMinimalRecord = context.minimalRecord
 
+  // An update holds the record's lock. On MySQL and MariaDB a plain read answers
+  // the transaction's first snapshot, and an update that stored the values the row
+  // already held leaves a version committed after that snapshot as it is; so after
+  // an update both reads below are locking reads, which see the record as stored.
+  // A created record is the transaction's own, which a plain read sees.
+  const locked = context.method === 'patch' || (context.method === 'put' && !context.isCreate)
   // A full response reads the record again through get; only hooks see the refresh.
   if (['finish', `finish${hookSuffix}`, 'afterCommit', 'afterRollback', 'transport:response'].some(event => hasHooks(event))) {
     try {
-      context.minimalRecord = await helpers.dataGetMinimal({ scopeName, context, runHooks })
+      context.minimalRecord = await helpers.dataGetMinimal({ scopeName, context, runHooks, locked })
     } catch (error) {
       throw wrapUnexpectedError(error, {
         message: `Failed to refresh record after ${context.method}`,
@@ -646,7 +653,8 @@ export async function handleRecordReturnAfterWrite ({ context, scopeName, api, s
       id: context.id,
       queryParams: context.queryParams,
       transaction: context.transaction,
-      format: context.format
+      format: context.format,
+      [queryConstraint]: { scopeName, locked }
     }, {
       ...context,
       inputRecord: {

@@ -251,6 +251,8 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     })
     query = selectionState.query
 
+    // A write's read-back of the record it has locked (see dataGetMinimal).
+    if (readsLockedRows(context, scopeName, db)) query.forShare()
     const record = await applyDatabaseReadOptions(query).first()
 
     if (!record) {
@@ -372,6 +374,8 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
       const records = await applyDatabaseReadOptions(rows.whereIn(idProperty, query).select(...(idsOnly ? [{ id: identities.id }] : [...listColumns, identities])))
       return records.map(record => idsOnly ? { type: scopeName, id: String(record.id) } : toJsonApiRecordWithBelongsTo(scope, record, scopeName))
     }
+    // A record this transaction has locked, read as its locking reads see it (see above).
+    if (locked && databaseFamily(db) === 'mysql') query.forShare()
     const record = await applyDatabaseReadOptions(query.select(`${tableName}.*`, identities)).first()
 
     if (!record) {

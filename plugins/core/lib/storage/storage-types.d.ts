@@ -293,7 +293,7 @@ export type QueryBuilderResult = StorageQuery | { query: QueryBuilderResult }
 export interface DataMinimalRequest extends DataReadRequest {
   filters?: StorageRow
   queryPurpose?: string
-  /** With ids: the caller's transaction holds row locks on them, so read them as its locking reads see them. */
+  /** The caller's transaction holds row locks on the ids (or the record), so read them as its locking reads see them. */
   locked?: boolean
   /**
    * With ids: lock the rows this read returns, in id order, in the same statement

@@ -141,8 +141,8 @@ export interface LifecycleVars extends RestApiPluginOptions {
 export interface LifecycleResource {
   scopeOptions: RestApiPluginOptions
   vars: LifecycleVars
-  get(params: { id?: string | number; queryParams?: QueryParams; transaction?: OwnedTransaction; format: 'jsonapi' }, context?: LifecycleContext): Promise<Document<Resource>>
-  get(params: { id?: string | number; queryParams?: QueryParams; transaction?: OwnedTransaction; format: ResourceFormat }, context?: LifecycleContext): Promise<Document<Resource> | StorageRow>
+  get(params: { id?: string | number; queryParams?: QueryParams; transaction?: OwnedTransaction; format: 'jsonapi'; [queryConstraint]?: MandatoryQueryConstraint }, context?: LifecycleContext): Promise<Document<Resource>>
+  get(params: { id?: string | number; queryParams?: QueryParams; transaction?: OwnedTransaction; format: ResourceFormat; [queryConstraint]?: MandatoryQueryConstraint }, context?: LifecycleContext): Promise<Document<Resource> | StorageRow>
   query(params: { queryParams?: QueryParams; transaction?: OwnedTransaction; format: 'jsonapi'; [queryConstraint]?: MandatoryQueryConstraint }, context?: LifecycleContext): Promise<Document<Resource[]>>
   patch(params: { id?: string | number; document: InputDocument; transaction?: OwnedTransaction; expectedVersion?: unknown; format: 'jsonapi'; returning: 'none' }, context?: LifecycleContext): Promise<void>
   checkPermissions(params: { method: string; originalContext: LifecycleContext }): Promise<unknown>

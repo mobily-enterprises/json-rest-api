@@ -356,6 +356,7 @@ export function createCanonicalDataHelpers ({
       const records = await applyDatabaseReadOptions(rows)
       return records.map(row => idsOnly ? { type: descriptor.resource, id: requireCanonicalResourceId(row, descriptor) } : toMinimal(row))
     }
+    if (locked && databaseFamily(context.db) === 'mysql') query.forShare()
     const row = await applyDatabaseReadOptions(query.select(`${canonical.tableName}.*`)).first()
     return row ? toMinimal(row) : null
   }
@@ -416,6 +417,8 @@ export function createCanonicalDataHelpers ({
     })
     query = selectionState.query
 
+    // A write's read-back of the record it has locked (see the ordinary dataGetMinimal).
+    if (readsLockedRows(context, scopeName, context.db)) query.forShare()
     const row = await applyDatabaseReadOptions(query).first()
 
     if (!row) return null

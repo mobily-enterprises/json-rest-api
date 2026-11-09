@@ -13,6 +13,7 @@ import { getRequestContracts, validateRequestContractOrThrow } from '../lib/quer
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { validateRequestedIncludes, filterToOneResponseLinkage, snapshotReadRecord } from './common.js'
 import { assertBlobReads } from '../lib/querying-writing/blob-fields.js'
+import { queryConstraint, readsLockedRows } from '../lib/querying/query-constraint.js'
 
 /**
  * Read one resource using params.id and params.queryParams. Missing resources
@@ -48,6 +49,9 @@ export default async function getMethod ({
 
   callerContext.transaction = params.transaction
   callerContext.db = callerContext.transaction || api.knex.instance
+  // A write's read-back names the record its transaction has locked (`locked`),
+  // so the record is read as the transaction's locking reads see it.
+  callerContext[queryConstraint] = params[queryConstraint]
 
   callerContext.scopeName = scopeName
   const context = /** @type {ReadContext<Resource>} */ (callerContext)
@@ -79,6 +83,7 @@ export default async function getMethod ({
   context.queryParams = validatedRequest.queryParams || {}
 
   const identityContext = /** @type {IdentityContext} */ (context)
+  const locked = readsLockedRows(context, scopeName, context.db)
 
   const notFound = () => new RestApiResourceError('Resource not found', {
     subtype: 'not_found',
@@ -100,7 +105,7 @@ export default async function getMethod ({
       assertBlobReads({ context, scopes, scopeName, rows: 1, operation: 'get' })
     } catch (error) {
       // A missing row answers 404 before a bad fieldset, as with two reads.
-      if (!(await helpers.dataGetMinimal({ scopeName, context: identityContext, runHooks }))) throw notFound()
+      if (!(await helpers.dataGetMinimal({ scopeName, context: identityContext, runHooks, locked }))) throw notFound()
       throw error
     }
     context.record = await readOnce({ scopeName, context: identityContext, runHooks })
@@ -109,7 +114,8 @@ export default async function getMethod ({
     const minimalRecord = await helpers.dataGetMinimal({
       scopeName,
       context: identityContext,
-      runHooks
+      runHooks,
+      locked
     })
     if (!minimalRecord) throw notFound()
 

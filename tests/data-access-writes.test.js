@@ -1353,6 +1353,34 @@ describe(`Many-row writes beside a concurrent commit (${storageMode.mode})`, { s
     assert.deepEqual((await fixture.rows('da_labels')).map(row => [row.name, row.color]), [['race', 'blue']])
   })
 
+  // Another transaction changes the label's slug and commits after this one first
+  // read it; `write` then stores values the row already holds. InnoDB leaves such
+  // a row as it is, so a plain read-back would still answer the snapshot's slug.
+  const writeAfterLateChange = async write => {
+    await fixture.reset()
+    const labels = fixture.api.resources.da_labels
+    const [{ id }] = (await labels.postMany({ data: [{ name: 'race', color: 'blue', slug: 'a-race' }], returning: 'minimal' }, workspaceA())).data
+    const first = await holdManagedTransaction(fixture.api)
+    try {
+      assert.deepEqual((await labels.query({ transaction: first.transaction }, workspaceA())).data.map(record => record.slug), ['a-race'])
+      await labels.patch({ id, data: { slug: 'b-race' }, returning: 'none' }, workspaceA())
+      const written = await write(labels, id, first.transaction)
+      await first.commit()
+      return written
+    } finally {
+      if (!first.transaction.isCompleted()) await first.rollback()
+    }
+  }
+
+  it('answers a write that changes nothing with the row as another transaction committed it after this one first read', async () => {
+    const patched = await writeAfterLateChange((labels, id, transaction) => labels.patch({ id, data: { color: 'blue' }, transaction }, workspaceA()))
+    assert.deepEqual([patched.color, patched.slug], ['blue', 'b-race'])
+    const replaced = await writeAfterLateChange((labels, id, transaction) => labels.put({ id, data: { name: 'race', color: 'blue', slug: 'b-race' }, transaction }, workspaceA()))
+    assert.deepEqual([replaced.color, replaced.slug], ['blue', 'b-race'])
+    const patchedMany = await writeAfterLateChange((labels, id, transaction) => labels.patchMany({ data: [{ id, color: 'blue' }], returning: 'full', transaction }, workspaceA()))
+    assert.deepEqual(patchedMany.data.map(record => [record.color, record.slug]), [['blue', 'b-race']])
+  })
+
   it('merges into a row another transaction had inserted but not committed when the merge began', { skip: idKeysOnly }, async () => {
     await fixture.reset()
     const labels = fixture.api.resources.da_labels

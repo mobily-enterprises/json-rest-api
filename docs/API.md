@@ -1818,7 +1818,13 @@ POST, PUT and PATCH retain their method-specific behavior within this sequence:
 
 `returning: 'full'` performs a nested GET during response preparation. Its GET
 hooks observe `method: 'get'`, while outer write hooks retain their write method.
-The nested read keeps authentication and transaction identity. None/minimal
+The nested read keeps authentication and transaction identity. After a PATCH,
+or a PUT that replaces a record, it reads the record, which the write holds
+locked, with a locking read on MySQL and MariaDB, as does the refresh of
+`minimalRecord` for finish hooks: their plain reads answer the transaction's
+first snapshot, and an update that stores the values the row already holds
+leaves a version another transaction committed after that snapshot in place.
+None/minimal
 responses do not imply that validation, setters or finish hooks are skipped.
 
 GET and QUERY run `beforeData` and their method-specific hook before reading.
