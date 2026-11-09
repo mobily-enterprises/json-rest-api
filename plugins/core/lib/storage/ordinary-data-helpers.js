@@ -22,6 +22,7 @@ import { serializeJsonApiQuery } from '../querying-writing/connectors-query-pars
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 import { whereInIdentifiers } from '../querying/identifier-query.js'
 import { columnsWithoutBlobs } from '../querying-writing/blob-fields.js'
+import { lockTargetRows } from '../writing/relationship-processor.js'
 
 /**
  * Every update advances the resource's lock version by one, whatever the input says.
@@ -289,7 +290,9 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     applyQueryFilters,
     filters = context.queryParams?.filters,
     queryPurpose = 'single',
-    locked = false
+    locked = false,
+    lock,
+    idsOnly = false
   }) {
     const storageAdapter = getScopeStorageAdapter(scopeName)
     context.storageAdapter = storageAdapter
@@ -302,10 +305,11 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     log.debug(`[Knex] GET_MINIMAL ${tableName}/${id}`)
 
     const table = db(tableName)
+    const values = ids?.map(value => storageAdapter.translateFilterValue('id', value))
     // whereInIdentifiers returns the builder it was given, which modify's types lose.
-    let query = ids === undefined
+    let query = values === undefined
       ? table.where(idProperty, id)
-      : /** @type {typeof table} */ (table.modify(whereInIdentifiers, idProperty, ids.map(value => storageAdapter.translateFilterValue('id', value))))
+      : /** @type {typeof table} */ (table.modify(whereInIdentifiers, idProperty, values))
           .distinct(`${tableName}.${idProperty}`)
 
     if (typeof applyQueryFilters === 'function') {
@@ -343,7 +347,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     }))
     // A read of several records reads no blob; one record's read reads its own.
     const listColumns = ids === undefined ? [] : columnsWithoutBlobs(scope.vars.schemaInfo, storageAdapter, tableName)
-    if (ids !== undefined && locked && databaseFamily(db) === 'mysql') {
+    if (values !== undefined && !lock && locked && databaseFamily(db) === 'mysql') {
       // InnoDB answers a plain read from the transaction's snapshot and a
       // locking read from the latest rows. Rows this transaction has locked
       // are read with a locking read in the scope's own query block, row
@@ -356,13 +360,17 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
       const records = [...new Map(rows.map(row => [String(row.id), row])).values()]
       return records.map(record => toJsonApiRecordWithBelongsTo(scope, record, scopeName))
     }
-    if (ids !== undefined) {
+    if (values !== undefined) {
       // Filtering owns predicates; the id list owns its identity projection.
       query.clearSelect().distinct(`${tableName}.${idProperty}`)
       // Deduplicate policy joins by ID, without comparing JSON or other row values.
+      let rows = storageAdapter.buildBaseQuery({ transaction: db })
+      // A locking read names the ids itself, so it reads and locks only their
+      // rows, in id order; the scope stays in the subquery, whose rows it does not lock.
+      if (lock) rows = lockTargetRows(rows.modify(whereInIdentifiers, idProperty, values).orderBy(`${tableName}.${idProperty}`), lock, db)
       /** @type {StorageRow[]} */
-      const records = await applyDatabaseReadOptions(storageAdapter.buildBaseQuery({ transaction: db }).whereIn(idProperty, query).select(...listColumns, identities))
-      return records.map(record => toJsonApiRecordWithBelongsTo(scope, record, scopeName))
+      const records = await applyDatabaseReadOptions(rows.whereIn(idProperty, query).select(...(idsOnly ? [{ id: identities.id }] : [...listColumns, identities])))
+      return records.map(record => idsOnly ? { type: scopeName, id: String(record.id) } : toJsonApiRecordWithBelongsTo(scope, record, scopeName))
     }
     const record = await applyDatabaseReadOptions(query.select(`${tableName}.*`, identities)).first()
 

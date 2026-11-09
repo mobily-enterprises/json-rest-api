@@ -4,7 +4,7 @@
  * } from './lifecycle-types.js' */
 import { applyResourceVersion, captureInverseVersions, inverseVersionTypes, invalidateInverseVersions } from '../lib/writing/resource-version.js'
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
-import { lockRelationshipParent, lockRelationshipTargets, processRelationships, sharedTargetChecks } from '../lib/writing/relationship-processor.js'
+import { lockRelationshipParent, processRelationships } from '../lib/writing/relationship-processor.js'
 import { updateReverseRelationship } from '../lib/writing/reverse-relationship-manipulations.js'
 import { updateManyToManyRelationship } from '../lib/writing/many-to-many-manipulations.js'
 import { ERROR_SUBTYPES } from '../lib/querying-writing/knex-constants.js'
@@ -37,6 +37,7 @@ export default async function patchMethod ({
   scopes,
   runHooks,
   hasHooks,
+  hookNames,
   scopeOptions,
   scopeName,
   api,
@@ -61,9 +62,13 @@ export default async function patchMethod ({
     validateUpdateRequest({ method: 'patch', params, context: preparedContext, vars, scopeOptions, scopeName })
     const context = /** @type {CompletedWriteContext} */ (preparedContext)
 
-    await validateRelationshipAccess(context, context.inputRecord, helpers, api)
+    // Checks and locks the targets; a parent whose revision this write advances
+    // is updated, not just referenced.
+    await validateRelationshipAccess(context, context.inputRecord, helpers, api, {
+      hasHooks, hookNames, lock: { exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo) }
+    })
 
-    const { belongsToUpdates, belongsToTargets, manyToManyRelationships, reverseRelationships } = processRelationships(
+    const { belongsToUpdates, manyToManyRelationships, reverseRelationships } = processRelationships(
       scope,
       { context }
     )
@@ -110,11 +115,6 @@ export default async function patchMethod ({
 
     await runHooks('beforeDataCall')
     await runHooks('beforeDataCallPatch')
-
-    // A parent whose revision this write advances is updated, not just referenced.
-    await lockRelationshipTargets(api, context.transaction, belongsToTargets, {
-      exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo), keyShare: true, checks: sharedTargetChecks(context)
-    })
 
     if (manyToManyRelationships.length || reverseRelationships.length) {
       await lockRelationshipParent({ context, helpers, scopeName })

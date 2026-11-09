@@ -28,7 +28,7 @@ import {
  * returns no resource and completes only an owned transaction.
  * @param {RelationshipWriteArguments<Identifier[]>} args
  */
-export default async function postRelationshipMethod ({ params, context: callerContext, vars, helpers, scope, scopes, runHooks, scopeOptions, scopeName, api, log }) {
+export default async function postRelationshipMethod ({ params, context: callerContext, vars, helpers, scope, scopes, runHooks, hasHooks, hookNames, scopeOptions, scopeName, api, log }) {
   rejectRemovedOptions(params)
   if (params.format !== undefined) resolveFormat(params.format)
   callerContext.method = 'postRelationship'
@@ -96,7 +96,7 @@ export default async function postRelationshipMethod ({ params, context: callerC
 
     await validateRelationshipAccess(context, {
       data: { relationships: { [context.relationshipName]: { data: params.relationshipData } } }
-    }, helpers, api)
+    }, helpers, api, { hasHooks, hookNames })
 
     // Add relationships
     if (relDef?.through) {

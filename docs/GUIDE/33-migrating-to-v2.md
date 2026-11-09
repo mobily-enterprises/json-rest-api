@@ -2660,7 +2660,10 @@ Row policies and `knexQueryFiltering` run with
 `queryPurpose: 'relationship-validation'`, empty client filters and no individual
 `context.id`. Add the complete row predicate to every supplied builder. Retain
 its selected ID and mandatory scope constraints; the filtered ID subquery
-selects the full minimal rows without multiplying them through policy joins.
+selects the targets' IDs (since 3.1.3; see
+[link checks on writes](35-migrating-to-v3.md#link-checks-on-writes-313)), or
+their full minimal rows for a target resource with a `checkPermissions` hook,
+without multiplying them through policy joins.
 An alternate-spelling lookup can run an additional scoped query to retain the
 database's ID collation semantics. Per-target decisions belong in the permission
 hook, where the individual ID and record are available.

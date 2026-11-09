@@ -1,7 +1,7 @@
 // Change many records by id: validate every row in memory, read which of the
 // ids the caller may change (one scoped read per chunk), then run one UPDATE per
 // chunk with CASE expressions. patchWhereIds and patchWhere reuse the same path.
-import { lockRelationshipTargets, processRelationships } from '../lib/writing/relationship-processor.js'
+import { processRelationships } from '../lib/writing/relationship-processor.js'
 import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { validateUpdateRequest } from '../lib/querying-writing/request-contracts.js'
@@ -100,7 +100,7 @@ function resolveOnlyIf (onlyIf, { schemaInfo, storageAdapter }) {
  * @param {{ operation: string, entries: Array<{ id: unknown, document: any, raw: Record<string, unknown> }>, started?: boolean, selection?: { filters?: Record<string, unknown>, lockMode?: 'update' | 'noKeyUpdate' } }} batch
  */
 async function runPatchMany (args, { operation, entries, started = false, selection }) {
-  const { params, context, vars, helpers, scope, runHooks, hasHooks, perRecordHooks, scopeOptions, scopeName, api } = args
+  const { params, context, vars, helpers, scope, runHooks, hasHooks, hookNames, perRecordHooks, scopeOptions, scopeName, api } = args
   const schemaInfo = context.schemaInfo
   const storageAdapter = helpers.getStorageAdapter(scopeName)
   const chunkSize = resolveChunkSize(params.chunkSize)
@@ -130,13 +130,13 @@ async function runPatchMany (args, { operation, entries, started = false, select
     return { rowContext, raw: entry.raw, index, clearsLink: false }
   })
   refuseDuplicateIds(rows.map(row => row.rowContext.id), storageAdapter)
-  await validateRelationshipTargets(context, [...targets.values()], helpers, api)
+  // One scoped read per related type for the whole batch, which also locks the targets.
+  await validateRelationshipTargets(context, [...targets.values()], helpers, api, { hasHooks, hookNames, lock: {} })
 
-  const parents = []
   for (const row of rows) {
     const { rowContext, index } = row
     try {
-      const { belongsToUpdates, belongsToTargets, manyToManyRelationships, reverseRelationships } = processRelationships(scope, { context: rowContext })
+      const { belongsToUpdates, manyToManyRelationships, reverseRelationships } = processRelationships(scope, { context: rowContext })
       if (manyToManyRelationships.length || reverseRelationships.length) {
         throw unsupported(scopeName, operation, 'rows set many-to-many or reverse relationships; change those links with single writes')
       }
@@ -149,7 +149,6 @@ async function runPatchMany (args, { operation, entries, started = false, select
       if (!Object.keys(rowContext.inputRecord.data.attributes).length && !Object.keys(row.raw).length && !schemaInfo.lockVersionField) {
         throw invalid('data', 'A patch row must change at least one field')
       }
-      parents.push(...belongsToTargets)
     } catch (error) { throw atIndex(error, index) }
   }
 
@@ -193,7 +192,6 @@ async function runPatchMany (args, { operation, entries, started = false, select
   context.ids = keptRows.map(row => String(row.rowContext.id))
   context.inputRecords = keptRows.map(row => row.rowContext.inputRecord)
   await runHooks('beforeDataCallPatchMany')
-  await lockRelationshipTargets(api, context.transaction, parents, { keyShare: true })
 
   const updates = []
   for (const { rowContext, raw, index } of keptRows) {

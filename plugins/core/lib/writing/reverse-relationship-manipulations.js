@@ -52,7 +52,7 @@ export async function updateReverseRelationship ({ api, helpers, context, scopeN
   }
   const requestedIds = [...requested.values()]
   // Every linked child names this parent: it is checked and locked once.
-  const checks = { visible: new Set(), locked: new Map() }
+  const checks = { visible: new Set() }
 
   const patchChild = async (id, linked) => {
     const data = { type: targetType, id }

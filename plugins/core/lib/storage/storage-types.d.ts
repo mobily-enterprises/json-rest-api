@@ -295,6 +295,14 @@ export interface DataMinimalRequest extends DataReadRequest {
   queryPurpose?: string
   /** With ids: the caller's transaction holds row locks on them, so read them as its locking reads see them. */
   locked?: boolean
+  /**
+   * With ids: lock the rows this read returns, in id order, in the same statement
+   * (`FOR UPDATE` when exclusive, else `FOR KEY SHARE` on PostgreSQL with keyShare,
+   * else a shared lock). The scope stays in a subquery, whose rows it does not lock.
+   */
+  lock?: { exclusive?: boolean, keyShare?: boolean }
+  /** With ids: read only the ids, as `{ type, id }` records without attributes. */
+  idsOnly?: boolean
   applyQueryFilters?: (params: QueryFilteringState & { query: StorageQuery }) => Promise<{ query: QueryBuilderResult } | null | undefined>
 }
 

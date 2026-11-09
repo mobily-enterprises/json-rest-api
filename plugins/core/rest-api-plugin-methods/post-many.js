@@ -1,7 +1,7 @@
 // Create many records: each row goes through validation, relationship access,
 // ownership stamping, setters and permissions in memory; then one INSERT runs
 // per chunk. Statement counts stay flat as the batch grows.
-import { lockRelationshipTargets, processRelationships } from '../lib/writing/relationship-processor.js'
+import { processRelationships } from '../lib/writing/relationship-processor.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { requireDocumentResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
@@ -184,7 +184,7 @@ async function mergeRows ({ context, helpers, scope, scopes, runHooks, scopeName
 
 /** @param {any} args */
 export default async function postManyMethod ({
-  params, context, vars, helpers, scope, scopes, runHooks, hasHooks, perRecordHooks, scopeOptions, scopeName, api, log
+  params, context, vars, helpers, scope, scopes, runHooks, hasHooks, hookNames, perRecordHooks, scopeOptions, scopeName, api, log
 }) {
   context.method = 'postMany'
   try {
@@ -232,15 +232,14 @@ export default async function postManyMethod ({
         return validated
       } catch (error) { throw atIndex(error, index) }
     })
-    // One scoped read per related type for the whole batch.
-    await validateRelationshipTargets(context, [...targets.values()], helpers, api)
+    // One scoped read per related type for the whole batch, which also locks the targets.
+    await validateRelationshipTargets(context, [...targets.values()], helpers, api, { hasHooks, hookNames, lock: {} })
 
-    const parents = []
     const rows = []
     for (const [index, document] of context.inputRecords.entries()) {
       const rowContext = { ...context, method: 'post', inputRecord: document, originalInputAttributes: undefined, bulkIndex: index }
       try {
-        const { belongsToUpdates, belongsToTargets, manyToManyRelationships, reverseRelationships } = processRelationships(scope, { context: rowContext })
+        const { belongsToUpdates, manyToManyRelationships, reverseRelationships } = processRelationships(scope, { context: rowContext })
         if (manyToManyRelationships.length || reverseRelationships.length) {
           throw unsupported(scopeName, 'postMany', 'rows set many-to-many or reverse relationships; create those links with single writes')
         }
@@ -255,7 +254,6 @@ export default async function postManyMethod ({
           relationships: structuredClone(document.data.relationships || {})
         }
         await scope.checkPermissions({ method: 'post', originalContext: rowContext })
-        parents.push(...belongsToTargets)
         rows.push(rowContext)
       } catch (error) { throw atIndex(error, index) }
     }
@@ -278,8 +276,6 @@ export default async function postManyMethod ({
     }
 
     await runHooks('beforeDataCallPostMany')
-    // Parents are locked once for the batch, in the transaction.
-    await lockRelationshipTargets(api, context.transaction, parents, { keyShare: true })
 
     const attributes = []
     const supplied = []

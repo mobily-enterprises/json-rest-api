@@ -329,6 +329,25 @@ themselves. Before, `%` and `_` (and on MySQL and PostgreSQL `\`) were LIKE
 pattern syntax, so `50%` also matched `500`. Use a search field with
 `applyFilter` for a real pattern.
 
+## Link checks on writes (3.1.3)
+
+A write checks the targets its relationships link to with one statement per
+target type, which for the belongs-to and polymorphic targets it stores also
+takes their shared lock (see
+[relationship locks](13-hooks-and-lifecycle.md#relationship-and-many-row-composition)):
+
+| 3.1.2 | 3.1.3 |
+| --- | --- |
+| a scoped read of the targets' whole rows, then a second statement per type locking them | one scoped read per type that locks them, of their ids alone (of the minimal records, for a target resource with a `checkPermissions` hook, which receives them) |
+| the targets are locked after the `beforeDataCall` hooks | they are locked while the write checks its relationships, before `beforeSchemaValidate` |
+| in a system context every link is read | a belongs-to whose declared foreign key protects it is left to that key (see [system contexts](34-scoped-reads-and-locks.md#system-contexts)); a missing target then fails with the database's foreign key error, not `not_found` |
+
+A missing target, or one its row policy hides, is refused as before
+(`not_found`, with `resourceType` and `resourceId`). Upgrading: a hook that
+updates a row the write links to must lock it `FOR UPDATE` in
+`beforeProcessing` (or the method's processing hook), no longer in
+`beforeDataCall`, which now runs after the shared lock is taken.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

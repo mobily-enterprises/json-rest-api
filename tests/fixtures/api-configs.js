@@ -1179,6 +1179,42 @@ export async function createCamelCaseBelongsToApi (knex, pluginOptions = {}) {
   return api
 }
 
+// Items link to owners, whose rows carry a JSON profile, and to tags, which a
+// row policy hides once archived. On table storage the items table declares a
+// database foreign key to each. `ownerPermission` is a checkPermissions hook
+// for owners alone.
+export async function createLinkCheckApi (knex, { storage = storageMode.mode, ownerPermission } = {}) {
+  const api = new JsonRestApi({ name: 'link-checks' })
+  await api.use(RestApiPlugin, { format: 'jsonapi', returning: 'none' })
+  await useStoragePlugin(api, knex, { storage, tenantId: 'link_checks' })
+  await api.use(RowPolicyPlugin, {
+    policies: { notArchived: ({ query, column }) => { query.where(column('archived'), false); return true } }
+  })
+  await api.addResource('lc_owners', {
+    schema: { id: { type: 'id' }, name: { type: 'string', max: 40 }, profile: { type: 'object', nullable: true } },
+    ...(ownerPermission ? { hooks: { checkPermissions: { functionName: 'lc-owner-permission', handler: ownerPermission } } } : {})
+  })
+  await api.addResource('lc_tags', {
+    schema: { id: { type: 'id' }, name: { type: 'string', max: 40 }, archived: { type: 'boolean', defaultTo: false } },
+    rowPolicy: 'notArchived'
+  })
+  const foreignKey = (column, table) => ({ name: `lc_items_${column}_fk`, columns: [column], referencedTableName: table, referencedColumns: ['id'] })
+  await api.addResource('lc_items', {
+    schema: {
+      id: { type: 'id' },
+      title: { type: 'string', max: 40 },
+      owner_id: { type: 'id', nullable: true, belongsTo: 'lc_owners', as: 'owner' },
+      tag_id: { type: 'id', nullable: true, belongsTo: 'lc_tags', as: 'tag' }
+    },
+    ...(storage === 'knex' ? { foreignKeys: [foreignKey('owner_id', 'lc_owners'), foreignKey('tag_id', 'lc_tags')] } : {})
+  })
+  for (const name of ['lc_owners', 'lc_tags', 'lc_items']) {
+    await api.resources[name].createKnexTable()
+    mapTable(knex, api, name, name)
+  }
+  return api
+}
+
 export async function seedCanonicalLinkRows (knex, rows) {
   for (let offset = 0; offset < rows.length; offset += 100) {
     await knex('any_links').insert(rows.slice(offset, offset + 100))

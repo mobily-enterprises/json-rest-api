@@ -3,7 +3,7 @@
  * CompletedWriteContext, LifecycleArguments, WriteContext
  * } from './lifecycle-types.js' */
 import { applyResourceVersion, captureInverseVersions, inverseVersionTypes, invalidateInverseVersions } from '../lib/writing/resource-version.js'
-import { lockRelationshipTargets, processRelationships } from '../lib/writing/relationship-processor.js'
+import { processRelationships } from '../lib/writing/relationship-processor.js'
 import { updateReverseRelationship } from '../lib/writing/reverse-relationship-manipulations.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { createPivotRecords } from '../lib/writing/many-to-many-manipulations.js'
@@ -34,6 +34,7 @@ export default async function postMethod ({
   scopes,
   runHooks,
   hasHooks,
+  hookNames,
   scopeOptions,
   scopeName,
   api,
@@ -76,9 +77,13 @@ export default async function postMethod ({
       })
     }
 
-    await validateRelationshipAccess(context, context.inputRecord, helpers, api)
+    // Checks and locks the targets; a parent whose revision this write advances
+    // is updated, not just referenced.
+    await validateRelationshipAccess(context, context.inputRecord, helpers, api, {
+      hasHooks, hookNames, lock: { exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo) }
+    })
 
-    const { belongsToUpdates, belongsToTargets, manyToManyRelationships, reverseRelationships } = await processRelationships(
+    const { belongsToUpdates, manyToManyRelationships, reverseRelationships } = await processRelationships(
       scope,
       { context }
     )
@@ -115,11 +120,6 @@ export default async function postMethod ({
 
     await runHooks('beforeDataCall')
     await runHooks('beforeDataCallPost')
-
-    // A parent whose revision this write advances is updated, not just referenced.
-    await lockRelationshipTargets(api, context.transaction, belongsToTargets, {
-      exclusive: inverseVersionTypes(api, scopeName, context.schemaInfo), keyShare: true
-    })
 
     await applyFieldSetters(context, api, helpers)
     const inverseVersions = await captureInverseVersions({ api, helpers, context, scopeName, isCreate: true })

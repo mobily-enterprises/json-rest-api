@@ -292,7 +292,7 @@ Policies are reused for the resource selections that define externally visible d
 | `include` | A target resource loaded into JSON:API `included` data. |
 | `search-join` | A related resource used by a cross-resource or polymorphic search, reference filter, or reference sort, including intermediate search path segments. |
 | `relationship-identifiers` | Child identifiers attached to a relationship, including has-many and AnyAPI many-to-many links. |
-| `relationship-validation` | A batch of up to 100 distinct target IDs referenced by a write payload, or a scoped lookup retaining database ID equality. |
+| `relationship-validation` | The targets of one type a write payload links to, by their IDs (the read that also locks the to-one targets the write stores), or a scoped lookup retaining database ID equality. |
 | `relationship-parent` | The parent of a relationship route such as `getRelated`. |
 | `report` | A `scopedQuery()` builder with the default purpose. |
 | `bulk-write` | The visible ids a many-row patch or delete may change, and `scopedQuery({ purpose: 'bulk-write' })`. |
@@ -324,12 +324,14 @@ MySQL and MariaDB have none. SQL projection callbacks run for each query.
 Nested collection includes run after all targets have been collected, so a
 global collection limit applies to the complete set.
 
-Relationship validation uses the same batch bound. Its query context has no
-individual `id` and no parent client filters. Retain the selected ID and scope
-predicates; filtering supplies an ID subquery used to fetch complete minimal
-records. Read permission hooks then receive each target's ID and minimal record,
-once per distinct identifier per relationship. Link writers do not run target
-response GET hooks. See the [migration steps](33-migrating-to-v2.md#relationship-target-validation).
+Relationship validation reads each target type's IDs in one query, bound the
+same way. Its query context has no individual `id` and no parent client
+filters. Retain the selected ID and scope predicates; filtering supplies an ID
+subquery, and the outer read selects the targets' IDs, locking the to-one
+targets the write stores. For a target resource with a `checkPermissions` hook
+it selects complete minimal records instead, and the hook receives each
+target's ID and minimal record, once per distinct identifier. Link writers do
+not run target response GET hooks. See the [migration steps](33-migrating-to-v2.md#relationship-target-validation).
 
 Large collection and relationship-metadata reads keep their selection in one
 SQL query. PostgreSQL uses an array predicate and SQLite uses a JSON1 ID

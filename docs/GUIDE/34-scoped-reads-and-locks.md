@@ -490,6 +490,12 @@ With a system context:
   and the key keeps the link from pointing at a missing one, so it needs no
   read. SQLite enforces foreign keys only on connections that turn them on, so
   there every link is read;
+- a write's belongs-to link to such a target is not checked with a read either:
+  the foreign key checks the target, and locks it, when the write stores the
+  link, so a missing target fails with the database's foreign key error rather
+  than `not_found`. A target whose resource has a `checkPermissions` hook, and a
+  parent whose revision the write advances, are still read (and on SQLite every
+  link is);
 - `aggregate` may group by, and count distinct, a hidden ownership field, so a
   job can find its units of work, then run each under a context for that owner:
 

@@ -111,9 +111,11 @@ await api.resources.books.postMany({
 })
 ```
 
-Rows may set belongs-to relationships. The library checks every target the
-batch names with one scoped read per related type, and locks them once for the
-batch with one statement per type, however many rows name them. Rows that set
+Rows may set belongs-to relationships. The library checks and locks every
+target the batch names with one statement per related type, however many rows
+name them: a scoped read of the targets' ids that takes their shared lock (see
+[relationship locks](13-hooks-and-lifecycle.md#relationship-and-many-row-composition)).
+Rows that set
 many-to-many or reverse (has-many) relationships are refused; change those
 links with single writes or the relationship methods.
 

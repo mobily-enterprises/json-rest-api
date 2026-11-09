@@ -190,7 +190,6 @@ export interface EnrichmentArguments extends Omit<LifecycleArguments, 'params' |
 
 export interface RelationshipPlan {
   belongsToUpdates: StorageRow
-  belongsToTargets: Identifier[]
   manyToManyRelationships: Array<{ relName: string; relDef: PivotField; relData: Identifier[] }>
   reverseRelationships: Array<{ relName: string; relDef: Field; relData: RelationshipData }>
 }

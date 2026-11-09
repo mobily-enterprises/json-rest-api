@@ -5,6 +5,7 @@ import { createIdConformanceApi } from './fixtures/api-configs.js'
 import { databaseClient } from './helpers/test-database.js'
 import { storageMode } from './helpers/storage-mode.js'
 import { boundLockWait, holdManagedTransaction } from './helpers/transaction-completion.js'
+import { connectionId, waitForLockWait } from './helpers/lock-wait.js'
 
 const identifier = ({ type, id }) => ({ type, id })
 const document = (type, id, attributes, relationships) => ({
@@ -419,22 +420,35 @@ describe(`Concurrent transactions on ${databaseClient} (${storageMode.mode})`, (
 
   for (const method of ['post', 'put', 'patch']) {
     for (const relationshipName of ['group', 'subject']) {
-      it(`rejects ${method.toUpperCase()} when its ${relationshipName} target is deleted after validation`, async () => {
+      it(`rejects ${method.toUpperCase()} when its ${relationshipName} target is deleted while the write checks it`, async () => {
         const deletion = await transaction()
         const writer = await transaction()
         await fixture.api.resources.groups.delete({ id: group.id, transaction: deletion.transaction })
         const id = method === 'post' ? '99' : item.id
-        const outcome = await withPausedWrite(
-          callback => { beforePatch = callback && ((context, scopeName) => context.pause && scopeName === 'items' ? callback(context) : undefined) },
-          () => fixture.api.resources.items[method]({
-            id,
-            document: document('items', id, { name: 'Changed', ...(method === 'put' ? { active: true, score: 1 } : {}) }, {
-              [relationshipName]: { data: identifier(group) }
-            }),
-            transaction: writer.transaction
-          }, { pause: true }),
-          () => deletion.commit()
-        )
+        const write = context => fixture.api.resources.items[method]({
+          id,
+          document: document('items', id, { name: 'Changed', ...(method === 'put' ? { active: true, score: 1 } : {}) }, {
+            [relationshipName]: { data: identifier(group) }
+          }),
+          transaction: writer.transaction
+        }, context)
+        let outcome
+        if (sqlite) {
+          // No row locks: the write checks the target in its snapshot, then the deletion commits.
+          outcome = await withPausedWrite(
+            callback => { beforePatch = callback && ((context, scopeName) => context.pause && scopeName === 'items' ? callback(context) : undefined) },
+            () => write({ pause: true }),
+            () => deletion.commit()
+          )
+        } else {
+          // The check locks the target, so it waits for the deletion and then finds the target gone.
+          const waiter = await connectionId(writer.transaction)
+          const pending = write({})
+          const settled = pending.then(value => ({ value }), error => ({ error }))
+          await waitForLockWait(fixture.knex, waiter, pending)
+          await deletion.commit()
+          outcome = await settled
+        }
         assert.ok(outcome.error, 'A write must not attach a reference to a target that was deleted')
         assert.ok(['REST_API_RESOURCE', '40001', 'SQLITE_BUSY', 'SQLITE_BUSY_SNAPSHOT'].includes(outcome.error.code), outcome.error.stack)
         if (outcome.error.code === 'REST_API_RESOURCE') assert.equal(outcome.error.subtype, 'not_found')

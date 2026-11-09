@@ -367,13 +367,14 @@ is `Post`, `Put` or `Patch`, for example `beforeDataCallPatch`.
 
 1. Create or borrow a transaction and select response behavior.
 2. `beforeProcessing`, then the method-specific processing hook.
-3. Validate the request contract and relationships, and perform the
+3. Validate the request contract; check the relationship targets, locking the
+   to-one targets the write stores (see below); and perform the
    method-specific existence/replacement checks. Run `beforeSchemaValidate`,
    then its method-specific hook; validate attributes; run the method-specific
    `afterSchemaValidate`, then `afterSchemaValidate`.
 4. Authorize through `checkPermissions`; run `beforeDataCall`, then its
    method-specific hook.
-5. Acquire required relationship locks, apply setters and write to storage.
+5. Acquire the remaining relationship locks, apply setters and write to storage.
 6. Run the method-specific `afterDataCall`, then `afterDataCall`.
 7. Apply relationship changes and refresh the minimal stored record when a
    `finish`, method-specific finish, `afterCommit`, `afterRollback` or
@@ -428,21 +429,26 @@ Socket.IO uses this boundary to query subscription membership before a change;
 its eligibility queries also run the ordinary query lifecycle in the write's
 transaction with the subscriber's trusted context.
 
-Relationship writes acquire database locks after the `beforeDataCall` hooks.
-Belongs-to, polymorphic and many-to-many targets are rechecked under a shared
-lock (`FOR SHARE` on PostgreSQL, `LOCK IN SHARE MODE` on MySQL and MariaDB):
-writers that reference the same row do not wait for each other, while its
-deletion waits for them. On PostgreSQL a belongs-to or polymorphic parent takes
-`FOR KEY SHARE`, the lock its foreign key checks take, so a transaction holding
-the parent with `lockMode: 'noKeyUpdate'` does not block them either (see
-[Lock mode](34-scoped-reads-and-locks.md#lock-mode)). A many-to-many target
-keeps `FOR SHARE`, which serializes two writes that add one edge from its
-opposite ends. A target
-the write also changes, such as a versioned parent whose revision it advances or
-a child moved by a reverse relationship, is locked `FOR UPDATE` instead. A hook
-that updates a referenced row upgrades the shared lock and can deadlock with a
-concurrent writer doing the same; lock that row `FOR UPDATE` in `beforeDataCall`
-first. Collection
+A resource write checks the targets its payload links to with one scoped read
+per target type. The read selects the targets' ids alone; for a target resource
+with a `checkPermissions` hook it selects their minimal records, and the hook
+then runs for each target. The belongs-to and polymorphic targets the write
+stores are locked by that same read, under a shared lock (`FOR SHARE` on
+PostgreSQL, `LOCK IN SHARE MODE` on MySQL and MariaDB): writers that reference
+the same row do not wait for each other, while its deletion waits for them. On
+PostgreSQL such a parent takes `FOR KEY SHARE`, the lock its foreign key checks
+take, so a transaction holding the parent with `lockMode: 'noKeyUpdate'` does
+not block them either (see [Lock mode](34-scoped-reads-and-locks.md#lock-mode)).
+In a [system context](34-scoped-reads-and-locks.md#system-contexts), a
+belongs-to whose declared foreign key protects it is left to that key. Other
+relationship locks are taken after the `beforeDataCall` hooks. A many-to-many
+target keeps `FOR SHARE`, which serializes two writes that add one edge from
+its opposite ends. A target the write also changes, such as a versioned parent
+whose revision it advances or a child moved by a reverse relationship, is
+locked `FOR UPDATE` instead. A hook that updates a referenced row upgrades the
+shared lock and can deadlock with a concurrent writer doing the same; lock that
+row `FOR UPDATE` in `beforeProcessing` (or the method's processing hook), which
+runs before the targets are checked. Collection
 mutations also preserve a parent row version so concurrent replacements cannot
 use stale membership; a database UPDATE trigger may run even when the parent's
 attribute values did not change. These internal operations do not invoke another

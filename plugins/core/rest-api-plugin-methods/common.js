@@ -28,7 +28,7 @@ import { databaseFamily } from '../lib/querying-writing/database-capabilities.js
 import { isSystemContext } from '../../../lib/system-context.js'
 import { findRelationshipDefinition } from '../lib/querying-writing/relationship-contracts.js'
 import { getResourceFieldset, parseFieldset } from '../lib/querying-writing/field-utils.js'
-import { sharedTargetChecks, targetKey } from '../lib/writing/relationship-processor.js'
+import { lockRelationshipTargets, sharedTargetChecks, targetKey } from '../lib/writing/relationship-processor.js'
 
 // A trusted connector callback, evaluated after normal write validation and authorization.
 export const writePrecondition = Symbol('writePrecondition')
@@ -377,27 +377,43 @@ export const validateResourceAttributesBeforeWrite = async ({
 }
 
 /**
+ * A target a write links to, with the names of the relationships that link it.
+ * @typedef {Identifier & { relationships?: Set<string> }} LinkTarget
+ */
+/**
+ * @typedef {object} LinkCheckOptions
+ * @property {LifecycleArguments['hasHooks']} [hasHooks] - Without it, each target is read whole and
+ *   authorized, as for a target with a permission hook.
+ * @property {LifecycleArguments['hookNames']} [hookNames]
+ * @property {{ exclusive?: Set<string> }} [lock] - The write stores its to-one links: lock their
+ *   targets, FOR UPDATE for the `exclusive` types (parents whose revision the write advances).
+ */
+
+/**
  * Validates that the user has access to all resources referenced in relationships
  *
  * @param {ResourceContext} context - The context object containing authentication info
  * @param {InputDocument} inputRecord - The input record containing relationships to validate
  * @param {LifecycleHelpers} helpers - Data helpers including dataGetMinimal
  * @param {LifecycleApi} api - API instance to access resources
+ * @param {LinkCheckOptions} [options]
  * @throws {Error} If user doesn't have access to any related resource
  */
-export const validateRelationshipAccess = async (context, inputRecord, helpers, api) => {
+export const validateRelationshipAccess = async (context, inputRecord, helpers, api, options) => {
   if (!inputRecord?.data?.relationships) return
+  /** @type {Map<string, LinkTarget>} */
   const unique = new Map()
   collectRelationshipTargets(inputRecord, api, unique)
-  await validateRelationshipTargets(context, [...unique.values()], helpers, api)
+  await validateRelationshipTargets(context, [...unique.values()], helpers, api, options)
 }
 
 /**
  * Normalizes a document's relationship identifiers and adds each target to
- * `unique`, so a batch of documents reads every related type once.
+ * `unique`, with the relationships that link it, so a batch of documents reads
+ * every related type once.
  * @param {InputDocument} inputRecord
  * @param {LifecycleApi} api
- * @param {Map<string, Identifier>} unique
+ * @param {Map<string, LinkTarget>} unique
  */
 export const collectRelationshipTargets = (inputRecord, api, unique) => {
   const relationships = /** @type {NonNullable<InputDocument['data']['relationships']>} */ (inputRecord?.data?.relationships || {})
@@ -412,24 +428,58 @@ export const collectRelationshipTargets = (inputRecord, api, unique) => {
       ? normalizedRelationshipData
       : [normalizedRelationshipData]
 
-    for (const item of relatedItems) unique.set(JSON.stringify([item.type, item.id]), item)
+    for (const { type, id } of relatedItems) {
+      const key = JSON.stringify([type, id])
+      const target = unique.get(key) || { type, id, relationships: new Set() }
+      target.relationships?.add(relName)
+      unique.set(key, target)
+    }
   }
 }
 
 /**
- * Checks that every target is visible to the caller, with one scoped read per
- * related type, however many targets there are.
+ * Checks that every target exists and is visible to the caller, with one
+ * scoped read per related type, however many targets there are. The read
+ * selects the targets' ids, or their minimal records for a target resource with
+ * a `checkPermissions` hook, which then runs for each of its targets.
+ *
+ * With `lock`, the targets the write links as to-one parents (belongs-to and
+ * polymorphic) are locked by that same read. A type that the write also names
+ * through another relationship is read without a lock, and its to-one targets
+ * are then locked by a second statement, so that the other relationship's own
+ * lock is never an upgrade of this one. In a system context, a belongs-to that
+ * a declared foreign key protects (linkNeedsNoRead) is not read at all when its
+ * type has no permission hook and is not locked for update: the database's
+ * foreign key checks its target, and locks it, when the write stores the link.
  * @param {ResourceContext} context
- * @param {Identifier[]} targets
+ * @param {LinkTarget[]} targets
  * @param {LifecycleHelpers} helpers
  * @param {LifecycleApi} api
+ * @param {LinkCheckOptions} [options]
  */
-export const validateRelationshipTargets = async (context, targets, helpers, api) => {
+export const validateRelationshipTargets = async (context, targets, helpers, api, { hasHooks, hookNames, lock } = {}) => {
+  const scopes = /** @type {Record<string, LifecycleResource>} */ (api.resources)
+  const locks = context.transaction ? lock : undefined
+  const exclusive = (/** @type {string} */ type) => Boolean(locks?.exclusive?.has(type))
+  const linksToOne = (/** @type {LinkTarget} */ item) => Boolean(context.schemaInfo && item.relationships?.size) &&
+    [...(item.relationships || [])].every(name => {
+      const definition = findRelationshipDefinition(context.schemaInfo, name)
+      return Boolean(definition?.belongsTo || definition?.belongsToPolymorphic)
+    })
+  const readsRecords = (/** @type {LifecycleResource} */ scope) => !hasHooks || hasHooks('checkPermissions', scope)
+  const needsNoRead = (/** @type {LinkTarget} */ item) => {
+    const scope = scopes[item.type]
+    const names = hookNames
+    if (!locks || !names || !scope || exclusive(item.type) || readsRecords(scope) || !linksToOne(item)) return false
+    return [...(item.relationships || [])].every(relationshipName => linkNeedsNoRead({
+      context, scopes, hookNames: names, sourceType: context.scopeName, relationshipName, targetType: item.type
+    }))
+  }
   // The child writes of one reverse relationship write share one parent: the
-  // first checks it, the others reuse that check.
+  // first checks and locks it, the others reuse that check.
   const checks = sharedTargetChecks(context)
-  if (checks) targets = targets.filter(item => !checks.visible.has(targetKey(item.type, item.id)))
-  /** @type {Map<string, Identifier[]>} */
+  targets = targets.filter(item => !checks?.visible.has(targetKey(item.type, item.id)) && !needsNoRead(item))
+  /** @type {Map<string, LinkTarget[]>} */
   const byType = new Map()
   for (const item of targets) {
     const items = byType.get(item.type)
@@ -437,8 +487,9 @@ export const validateRelationshipTargets = async (context, targets, helpers, api
     else byType.set(item.type, [item])
   }
   const lookups = new Map()
-  for (const [type, items] of byType) {
-    const relatedScope = api.resources[type]
+  // Types in name order, as lockRelationshipTargets takes their locks.
+  for (const [type, items] of [...byType].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) {
+    const relatedScope = scopes[type]
     if (!relatedScope) throw new Error(`Unknown resource type: ${type}`)
     const getContext = {
       ...context,
@@ -450,6 +501,7 @@ export const validateRelationshipTargets = async (context, targets, helpers, api
       method: 'get',
       isUpdate: false
     }
+    const records = readsRecords(relatedScope)
     const lookup = {
       scopeName: type,
       context: getContext,
@@ -458,30 +510,34 @@ export const validateRelationshipTargets = async (context, targets, helpers, api
         ...filterParams, schemaInfo: getContext.schemaInfo
       }, getContext),
       filters: {},
-      queryPurpose: 'relationship-validation'
+      queryPurpose: 'relationship-validation',
+      idsOnly: !records,
+      lock: locks && items.every(linksToOne) ? { exclusive: exclusive(type), keyShare: true } : undefined
     }
-    const records = new Map()
-    for (const record of await helpers.dataGetMinimal({ ...lookup, ids: items.map(item => item.id) })) records.set(String(record.id), record)
-    lookups.set(type, { relatedScope, lookup, records })
+    const found = new Map()
+    for (const record of await helpers.dataGetMinimal({ ...lookup, ids: items.map(item => item.id) })) found.set(String(record.id), record)
+    lookups.set(type, { relatedScope, lookup, records, found })
   }
   // In the order given, so the first missing or forbidden target is the one reported.
   for (const item of targets) {
-    const { relatedScope, lookup, records } = lookups.get(item.type)
+    const { relatedScope, lookup, records, found } = lookups.get(item.type)
     // A database collation can equate IDs with different spellings.
-    const record = records.get(String(item.id)) || await helpers.dataGetMinimal({
-      ...lookup, context: { ...lookup.context, id: item.id }
-    })
+    const record = found.get(String(item.id)) || (await helpers.dataGetMinimal({ ...lookup, ids: [item.id] }))[0]
     if (!record) {
       throw new RestApiResourceError(
         `Cannot create relationship to non-existent ${item.type} with id ${item.id}`,
         { subtype: 'not_found', resourceType: item.type, resourceId: item.id }
       )
     }
-    await relatedScope.checkPermissions({
-      method: 'get',
-      originalContext: { ...lookup.context, id: item.id, minimalRecord: record }
-    })
+    if (records) {
+      await relatedScope.checkPermissions({
+        method: 'get',
+        originalContext: { ...lookup.context, id: item.id, minimalRecord: record }
+      })
+    }
   }
+  const unlocked = locks ? targets.filter(item => linksToOne(item) && !lookups.get(item.type).lookup.lock) : []
+  if (unlocked.length) await lockRelationshipTargets(api, context.transaction, unlocked, { exclusive: locks?.exclusive, keyShare: true })
   if (checks) for (const item of targets) checks.visible.add(targetKey(item.type, item.id))
 }
 

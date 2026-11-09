@@ -16,6 +16,7 @@ import { applyInsertReturning, databaseFamily } from '../querying-writing/databa
 import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
 import { deleteFoundRow, foundRow, lockFoundRow, updateFoundRow } from './single-row-writes.js'
 import { whereInIdentifiers } from '../querying/identifier-query.js'
+import { lockTargetRows } from '../writing/relationship-processor.js'
 
 /** @param {StorageRow} row @param {CanonicalDescriptor} descriptor */
 function requireCanonicalResourceId (row, descriptor) {
@@ -267,7 +268,9 @@ export function createCanonicalDataHelpers ({
     applyQueryFilters,
     filters = context.queryParams?.filters,
     queryPurpose = 'single',
-    locked = false
+    locked = false,
+    lock,
+    idsOnly = false
   }) {
     const storageAdapter = getScopeStorageAdapter(scopeName)
     if (!storageAdapter) throw new Error(`Storage adapter for resource '${scopeName}' not found`)
@@ -281,11 +284,9 @@ export function createCanonicalDataHelpers ({
     let query = context.db(canonical.tableName)
       .where(canonical.resourceColumn, descriptor.resource)
       .where(canonical.tenantColumn, descriptor.tenant)
-    if (ids === undefined) query.where(logicalIdColumn, id)
-    else {
-      query.modify(whereInIdentifiers, logicalIdColumn, ids.map(value => storageAdapter.translateFilterValue('id', value)))
-        .distinct(`${canonical.tableName}.${logicalIdColumn}`)
-    }
+    const values = ids?.map(value => storageAdapter.translateFilterValue('id', value))
+    if (values === undefined) query.where(logicalIdColumn, id)
+    else query.modify(whereInIdentifiers, logicalIdColumn, values).distinct(`${canonical.tableName}.${logicalIdColumn}`)
 
     if (typeof applyQueryFilters === 'function') {
       const scopedQueryState = await applyQueryFilters({
@@ -334,7 +335,7 @@ export function createCanonicalDataHelpers ({
       if (scope) decorateResourceLinks({ resource: minimal, scope, scopeName, context })
       return minimal
     }
-    if (ids !== undefined && locked && databaseFamily(context.db) === 'mysql') {
+    if (values !== undefined && !lock && locked && databaseFamily(context.db) === 'mysql') {
       // Rows this transaction has locked are read with a locking read, as the
       // ordinary dataGetMinimal explains: InnoDB's plain reads keep the
       // transaction's snapshot.
@@ -343,12 +344,17 @@ export function createCanonicalDataHelpers ({
       // A policy join can repeat a row.
       return [...new Map(rows.map(toMinimal).map(record => [String(record.id), record])).values()]
     }
-    if (ids !== undefined) {
+    if (values !== undefined) {
       // Filtering owns predicates; the id list owns its identity projection.
       query.clearSelect().distinct(`${canonical.tableName}.${logicalIdColumn}`)
+      let rows = storageAdapter.buildBaseQuery({ transaction: context.db })
+      // A locking read names the ids itself, as the ordinary dataGetMinimal explains.
+      if (lock) rows = lockTargetRows(rows.modify(whereInIdentifiers, logicalIdColumn, values).orderBy(`${canonical.tableName}.${logicalIdColumn}`), lock, context.db)
+      rows.whereIn(logicalIdColumn, query)
+      if (idsOnly) rows.select(`${canonical.tableName}.${logicalIdColumn}`)
       /** @type {StorageRow[]} */
-      const rows = await applyDatabaseReadOptions(storageAdapter.buildBaseQuery({ transaction: context.db }).whereIn(logicalIdColumn, query))
-      return rows.map(toMinimal)
+      const records = await applyDatabaseReadOptions(rows)
+      return records.map(row => idsOnly ? { type: descriptor.resource, id: requireCanonicalResourceId(row, descriptor) } : toMinimal(row))
     }
     const row = await applyDatabaseReadOptions(query.select(`${canonical.tableName}.*`)).first()
     return row ? toMinimal(row) : null

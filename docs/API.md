@@ -1330,7 +1330,8 @@ await resource.deleteWhere({ filters | all: true, returning, chunkSize, transact
 Each call is all-or-nothing. Every row is validated, stamped, passed through
 setters and authorized with `checkPermissions` (`method` `post`, `patch` or
 `delete`, `originalContext.bulkIndex` the row's position); belongs-to targets
-are checked with one read per related type; then one statement runs per chunk.
+are checked and share-locked with one read of their ids per related type; then
+one statement runs per chunk.
 Patches refuse the id, ownership fields (also through a polymorphic
 relationship) and the `lockVersionField`, and accept real `knex.raw()` values
 for stored, non-relationship fields. The UPDATE, DELETE and lock statements
