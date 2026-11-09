@@ -22,6 +22,7 @@ import {
   atIndex,
   keepVisible,
   manyRowResponse,
+  assertManyRowBlobReads,
   noHooks,
   refuseDuplicateIds,
   refuseUnsupportedResource,
@@ -105,6 +106,7 @@ async function runPatchMany (args, { operation, entries, started = false, select
   const chunkSize = resolveChunkSize(params.chunkSize)
   const missing = selection ? 'skip' : resolveMissing(params.missing)
   refuseUnsupportedResource({ api, helpers, perRecordHooks, scopeName, schemaInfo, operation, kind: 'patch', storageHelper: 'dataUpdateByIds' })
+  assertManyRowBlobReads({ api, scopeName, context, returning: context.returning, queryParams: params.queryParams, rows: entries.length })
   const onlyIf = resolveOnlyIf(params.onlyIf, { schemaInfo, storageAdapter })
   entries.forEach((entry, index) => refuseProtectedInput({ ...entry, schemaInfo, index }))
 

@@ -1,4 +1,5 @@
-import { addType } from 'json-rest-schema'
+import { Buffer } from 'node:buffer'
+import { addType, addValidator } from 'json-rest-schema'
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
@@ -43,11 +44,33 @@ const xid8Type = (context) => {
 }
 xid8Type.toJsonSchema = () => ({ type: 'string', format: 'xid8', pattern: XID8_PATTERN.source })
 
+/**
+ * A blob's bytes: a Buffer, or a Uint8Array as a Buffer over the same memory.
+ * @param {any} context
+ */
+const blobType = (context) => {
+  const { value } = context
+  if (!(value instanceof Uint8Array)) context.throwParamError('TYPE_CAST_FAILED', 'A blob is a Buffer or a Uint8Array.')
+  return Buffer.isBuffer(value) ? value : Buffer.from(value.buffer, value.byteOffset, value.byteLength)
+}
+
+/** @param {any} context */
+const maxBytesValidator = (context) => {
+  const { value, parameterValue } = context
+  if (value instanceof Uint8Array && value.byteLength > parameterValue) {
+    context.throwParamError('MAX_BYTES', `Value must hold at most ${parameterValue} bytes.`, { max: parameterValue, actual: value.byteLength })
+  }
+}
+// JSON carries no bytes, so the limit has no JSON Schema form.
+maxBytesValidator.toJsonSchema = () => ({})
+
 let installed = false
 
 /**
  * Register the types json-rest-schema lacks: email and uuid, which every
- * storage keeps in string columns, and xid8, PostgreSQL's transaction id.
+ * storage keeps in string columns, and xid8, PostgreSQL's transaction id. A
+ * blob, which json-rest-schema passes through as any value, takes bytes only,
+ * at most its maxBytes of them.
  */
 export function installFieldTypes () {
   if (installed) return
@@ -55,6 +78,8 @@ export function installFieldTypes () {
   addType('email', formattedStringType(EMAIL_PATTERN, 'email'))
   addType('uuid', formattedStringType(UUID_PATTERN, 'uuid'))
   addType('xid8', xid8Type)
+  addType('blob', blobType)
+  addValidator('maxBytes', maxBytesValidator)
 }
 
 /**

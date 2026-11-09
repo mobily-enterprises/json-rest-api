@@ -9,6 +9,7 @@ import { resolveFormat } from '../lib/querying-writing/response-options.js'
 import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified-helpers.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { chunk } from '../lib/storage/many-row-data-helpers.js'
+import { assertBlobReads, columnsWithoutBlobs } from '../lib/querying-writing/blob-fields.js'
 import { filterToOneResponseLinkage, snapshotReadRecord } from './common.js'
 import { refuseDuplicateIds, requireLockTransaction, resolveLockMode, resolveMissing, validateFilters } from './many-row-common.js'
 
@@ -45,7 +46,9 @@ export async function scopedQueryMethod ({ params, context, vars, helpers, scope
   // A caller who may not query the resource may not build reports on it either.
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', scopedQuery: true } })
   const { query, alias: name } = await helpers.dataScopedQuery({ scopeName, context, runHooks, alias, purpose, filters: context.queryParams.filters })
-  const derived = (transaction || api.knex.instance).from(query.select(`${name}.*`).as(name))
+  // A report reads no blob: the derived table carries every other column.
+  const columns = columnsWithoutBlobs(context.schemaInfo, helpers.getStorageAdapter(scopeName), name)
+  const derived = (transaction || api.knex.instance).from(query.select(columns).as(name))
   return { query: readOnlyQueryBuilder(derived, { resourceType: scopeName }) }
 }
 
@@ -53,12 +56,14 @@ export async function scopedQueryMethod ({ params, context, vars, helpers, scope
  * Every row the filters select, read in cursor pages of `pageSize` rows.
  * @param {any} args
  */
-export async function queryAllMethod ({ params, context, vars, scopeName, api }) {
+export async function queryAllMethod ({ params, context, vars, scopes, scopeName, api }) {
   const { queryParams = {}, transaction, pageSize = DEFAULT_QUERY_ALL_PAGE, rowLimit, format, ...unknown } = params
   if (Object.keys(unknown).length) throw invalid(Object.keys(unknown)[0], `Unknown queryAll options: ${Object.keys(unknown).join(', ')}`)
   if (!Number.isSafeInteger(pageSize) || pageSize < 1) throw invalid('pageSize', 'pageSize must be a positive integer')
   if (rowLimit !== undefined && (!Number.isSafeInteger(rowLimit) || rowLimit < 1)) throw invalid('rowLimit', 'rowLimit must be a positive integer')
   if (queryParams.page !== undefined) throw invalid('queryParams.page', 'queryAll pages by itself; leave out queryParams.page')
+  // It keeps every page, so it holds no blob.
+  assertBlobReads({ context: { ...context, queryParams }, scopes, scopeName, rows: Infinity, operation: 'queryAll' })
   const resolvedFormat = resolveFormat(format, vars.format)
   const sort = queryParams.sort?.length ? queryParams.sort : ['id']
 
@@ -160,6 +165,7 @@ export async function lockByIdsMethod (args) {
   const storageAdapter = helpers.getStorageAdapter(scopeName)
   refuseDuplicateIds(ids, storageAdapter, 'ids')
   const missing = resolveMissing(params.missing)
+  assertBlobReads({ context, scopes, scopeName, rows: ids.length, operation: 'lockByIds' })
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
   // Sorted before chunking, so lists longer than a chunk still lock in one
   // order across transactions: a list of integers numerically, any other list
@@ -191,6 +197,7 @@ export async function lockWhereMethod (args) {
   const { params, context, vars, helpers, scope, scopes, runHooks, hasHooks, hookNames, scopeName } = args
   const lockMode = await setupLockRead(args, 'lockWhere', 'dataLockWhere')
   const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
+  assertBlobReads({ context, scopes, scopeName, rows: MAX_LOCK_WHERE + 1, operation: 'lockWhere' })
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
   const document = await helpers.dataLockWhere({ scopeName, context, runHooks, filters, limit: MAX_LOCK_WHERE + 1, lockMode })
   if (document.data.length > MAX_LOCK_WHERE) throw new RestApiRowLimitError({ resourceType: scopeName, rowLimit: MAX_LOCK_WHERE, operation: 'lockWhere' })
@@ -213,11 +220,12 @@ export async function claimMethod (args) {
   const schema = context.schemaInfo.schemaStructure
   const sort = sortParam.map((entry, index) => {
     const field = typeof entry === 'string' ? entry.replace(/^-/, '') : null
-    if (!field || (field !== 'id' && (!schema[field] || schema[field].virtual || schema[field].computed))) {
-      throw invalid(`sort.${index}`, `'${entry}' is not a stored field`)
+    if (!field || (field !== 'id' && (!schema[field] || schema[field].virtual || schema[field].computed || schema[field].type === 'blob'))) {
+      throw invalid(`sort.${index}`, `'${entry}' is not a stored field that sorts`)
     }
     return { field, direction: entry.startsWith('-') ? 'desc' : 'asc' }
   })
+  assertBlobReads({ context, scopes, scopeName, rows: limit, operation: 'claim' })
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
   const document = await helpers.dataClaim({ scopeName, context, runHooks, filters, sort, limit, lockMode })
   return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks, hookNames })

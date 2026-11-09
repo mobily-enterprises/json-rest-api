@@ -131,7 +131,8 @@ export const buildFieldSelection = async (scope, deps) => {
 
       // Skip normallyHidden fields - these are hidden by default
       // Example: cost with normallyHidden:true (only returned when explicitly requested)
-      if (fieldDef.normallyHidden === true) return
+      // A blob is read only where it is named too.
+      if (fieldDef.normallyHidden === true || fieldDef.type === 'blob') return
 
       fieldsToSelect.add(field)
     })

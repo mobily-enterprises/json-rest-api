@@ -2312,6 +2312,50 @@ If an id normalizes to an empty value:
 - existing-resource operations fail as `REST_API_RESOURCE` with subtype `not_found`
 - explicit `POST` document ids fail as `REST_API_VALIDATION` on `data.id`
 
+#### Blob Fields
+
+A `blob` field holds bytes the process reads and writes whole, on table storage
+(AnyAPI storage keeps no bytes and refuses one). It needs `maxBytes`, the most
+bytes a value holds:
+
+```javascript
+await api.addResource('scans', {
+  schema: {
+    id: { type: 'id' },
+    title: { type: 'string', required: true },
+    image: { type: 'blob', maxBytes: 2 * 1024 * 1024, nullable: true }
+  }
+});
+await api.resources.scans.post({ document: { data: { type: 'scans', attributes: { title: 'Receipt', image: buffer } } } });
+const { data } = await api.resources.scans.get({ id, queryParams: { fields: { scans: 'image' } } });
+```
+
+- **Registration** refuses a blob without `maxBytes` (a whole number from 1),
+  with `search`, `unique`, `index`, `indexed`, `primary`, `belongsTo` or a
+  default, a search field over it, and `maxBytes` on any other type. On MySQL
+  and MariaDB, which receive a written blob as hex text, it also refuses blobs
+  whose `2 × maxBytes` plus 1 MiB exceed the server's `max_allowed_packet`.
+- **Writes** take a `Buffer` or a `Uint8Array` (stored as a `Buffer`), or null
+  when the field is nullable. Anything else fails validation (rule
+  `TYPE_CAST_FAILED`, or `single_value` for an object or array), and more than
+  `maxBytes` with rule `MAX_BYTES`, before any statement. A many-row write puts at most 16 MiB of blobs, by their
+  `maxBytes`, in one statement (on MySQL and MariaDB, at most what
+  `max_allowed_packet` holds).
+- **Reads** answer a blob, as a `Buffer`, only where sparse fieldsets name it;
+  default reads, includes, minimal reads and the `scopedQuery` derived table
+  carry no blob column. A read naming blobs holds at most 16 MiB of them, or one
+  record's: a `query` page, `lockByIds` ids, a `claim` limit, `lockWhere` (up
+  to 1,001 rows) and a many-row write's full answer are refused (rule
+  `blob_read`) past `max(1, floor(16 MiB / sum of the named maxBytes))`
+  records. `queryAll`, which keeps every matching row, an included resource's
+  blob, and any blob in an HTTP response (JSON carries no bytes) are refused
+  too; serve bytes from a route of your own that reads them with `get`. A blob is never
+  sorted or filtered.
+- **Columns**: `createKnexTable` gives a blob a binary column (`bytea` on
+  PostgreSQL); on MySQL and MariaDB the smallest of `tinyblob`, `blob`,
+  `mediumblob` and `longblob` that holds `maxBytes`, and the migration diff
+  grows a column that holds less.
+
 #### Storage Column Naming
 
 Table-backed resources use snake_case physical columns by default. For example, `displayName` maps to `display_name`.

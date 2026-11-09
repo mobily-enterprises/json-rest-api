@@ -204,12 +204,7 @@ function resolveTypeKind ({ name = '', dataType = '', columnType = '' } = {}) {
   if (normalizedType === 'json' || normalizedType === 'jsonb') {
     return 'json'
   }
-  if (
-    normalizedType === 'blob' ||
-    normalizedType === 'bytea' ||
-    normalizedType === 'binary' ||
-    normalizedType === 'varbinary'
-  ) {
+  if (['tinyblob', 'blob', 'mediumblob', 'longblob', 'bytea', 'binary', 'varbinary'].includes(normalizedType)) {
     return 'binary'
   }
 

@@ -97,7 +97,7 @@ export const getEffectiveSortableFields = (vars = {}) => {
     const actualField = resolveSortField(field, vars.schemaInfo)
     const queryFields = vars.schemaInfo?.queryFields || {}
     const definition = Object.hasOwn(queryFields, actualField) ? queryFields[actualField] : schema[actualField]
-    return definition?.hidden !== true && !['object', 'array'].includes(definition?.type)
+    return definition?.hidden !== true && !['object', 'array', 'blob'].includes(definition?.type)
   })
 }
 

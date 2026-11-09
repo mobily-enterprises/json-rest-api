@@ -170,10 +170,14 @@ export const getDatabaseInfo = async (knex, log) => {
   try {
     /** @type {unknown} */
     let version
+    /** @type {number | undefined} */
+    let maxAllowedPacket
     switch (name) {
       case 'MySQL': {
-        const row = await knex.first(knex.raw('VERSION() as version'))
+        // The longest statement the server takes, which bounds a blob a write sends.
+        const row = /** @type {{ version?: string, maxAllowedPacket?: number | string } | undefined} */ (await knex.first(knex.raw('VERSION() as version, @@max_allowed_packet as maxAllowedPacket')))
         version = row && 'version' in row ? row.version : undefined
+        if (row && Number.isSafeInteger(Number(row.maxAllowedPacket))) maxAllowedPacket = Number(row.maxAllowedPacket)
         break
       }
       case 'SQLite':
@@ -187,7 +191,7 @@ export const getDatabaseInfo = async (knex, log) => {
         version = (await knex.raw('SELECT VERSION() as version'))?.[0]?.version
     }
     if (typeof version !== 'string') throw new Error('Database version query did not return a string')
-    return { client: name, version }
+    return maxAllowedPacket === undefined ? { client: name, version } : { client: name, version, maxAllowedPacket }
   } catch (error) {
     // Capability observation is advisory; a failing diagnostic must not replace it.
     try {

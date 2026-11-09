@@ -11,6 +11,7 @@ import { inverseVersionTypes } from '../lib/writing/resource-version.js'
 import { isRawValue } from '../lib/storage/many-row-data-helpers.js'
 import { queryConstraint } from '../lib/querying/query-constraint.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
+import { assertBlobReads } from '../lib/querying-writing/blob-fields.js'
 
 export const DEFAULT_CHUNK_SIZE = 500
 const READ_CHUNK_SIZE = 1000
@@ -259,6 +260,16 @@ export function validateFilters ({ filters, scopeName, schemaInfo, vars }) {
 }
 
 /**
+ * Refuse a full answer of `rows` written records whose fields name blobs it
+ * cannot hold (see assertBlobReads); called before the write when the rows are known.
+ * @param {{ api: any, scopeName: string, context: any, returning: string, queryParams?: any, rows: number }} request
+ */
+export function assertManyRowBlobReads ({ api, scopeName, context, returning, queryParams = {}, rows }) {
+  if (returning !== 'full') return
+  assertBlobReads({ context: { ...context, queryParams: { fields: queryParams?.fields } }, scopes: api.resources, scopeName, rows, operation: context.method })
+}
+
+/**
  * The response of a many-row write: the count of written rows, identifiers,
  * full records read through `query` in the write's transaction, or nothing.
  * `locked`: the transaction holds row locks on the ids, so they are read as locked.
@@ -269,6 +280,7 @@ export async function manyRowResponse ({ api, scopeName, context, ids, returning
   const present = ids.filter(id => id !== undefined && id !== null).map(String)
   if (returning === 'count') return { meta: { count: present.length } }
   if (returning === 'minimal') return { data: present.map(id => ({ type: scopeName, id })) }
+  assertManyRowBlobReads({ api, scopeName, context, returning, queryParams, rows: present.length })
 
   const byId = new Map()
   /** @type {Map<string, any>} */

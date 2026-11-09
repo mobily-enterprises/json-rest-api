@@ -362,6 +362,8 @@ export type CanonicalDataReadHelpers = DataReadHelpers<DataDocument<DataResource
 export interface DatabaseInfo {
   client: string
   version: string
+  /** MySQL and MariaDB: the server's max_allowed_packet, the longest statement it takes. */
+  maxAllowedPacket?: number
   error?: string
 }
 

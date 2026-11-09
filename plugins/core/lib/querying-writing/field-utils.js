@@ -26,6 +26,11 @@ export function assertFieldNameMap (declarations, location) {
 /** @param {StorageFieldDefinition | null | undefined} definition @param {string} fieldName @param {string} operation */
 export function assertScalarQueryField (definition, fieldName, operation) {
   const type = definition?.type
+  if (type === 'blob') {
+    const parameter = operation === 'sort' ? 'sort' : `filters.${fieldName}`
+    const message = `Field '${fieldName}' is a blob, which is written and read whole and cannot be used in ${operation} operations.`
+    throw new RestApiValidationError(message, { fields: [parameter], violations: [{ field: parameter, rule: 'blob_query', message }] })
+  }
   if (type === undefined || !SERIALIZATION_CAPABILITIES.structuredTypes.includes(type)) return
   const parameter = operation === 'sort' ? 'sort' : `filters.${fieldName}`
   const message = `Field '${fieldName}' has type '${type}' and cannot be used in whole-document ${operation} operations. Use a scalar field or projection for sorting, or a custom applyFilter function for JSON queries.`
@@ -146,8 +151,9 @@ export const filterHiddenFields = (attributes, schema, requestedFields) => {
 
     // Include normallyHidden fields only if explicitly requested
     // Example: 'cost' with normallyHidden:true is only included if user requests it
-    // via sparse fieldsets like ?fields[products]=name,cost
-    if (fieldDef?.normallyHidden === true) {
+    // via sparse fieldsets like ?fields[products]=name,cost. A blob is answered
+    // only where it is named too.
+    if (fieldDef?.normallyHidden === true || fieldDef?.type === 'blob') {
       if (!requested || !requested.includes(field)) {
         return // Filter out normallyHidden field
       }

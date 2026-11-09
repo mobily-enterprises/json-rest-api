@@ -26,6 +26,8 @@ export interface ResourceFieldOptions {
   max?: number
   minLength?: number
   maxLength?: number
+  /** A blob's limit, required on `type: 'blob'`: the most bytes a value holds. */
+  maxBytes?: number
   length?: number
   pattern?: string | RegExp
   notEmpty?: boolean

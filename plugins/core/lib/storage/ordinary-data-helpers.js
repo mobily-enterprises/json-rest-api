@@ -21,6 +21,7 @@ import { unwrapQueryBuilderState, withQueryFilteringContext } from '../querying/
 import { serializeJsonApiQuery } from '../querying-writing/connectors-query-parser.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 import { whereInIdentifiers } from '../querying/identifier-query.js'
+import { columnsWithoutBlobs } from '../querying-writing/blob-fields.js'
 
 /**
  * Every update advances the resource's lock version by one, whatever the input says.
@@ -340,6 +341,8 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
       const column = storageAdapter.translateColumn(field)
       return [field === 'id' ? 'id' : column, databaseIdentityExpression(db, `${tableName}.${column}`)]
     }))
+    // A read of several records reads no blob; one record's read reads its own.
+    const listColumns = ids === undefined ? [] : columnsWithoutBlobs(scope.vars.schemaInfo, storageAdapter, tableName)
     if (ids !== undefined && locked && databaseFamily(db) === 'mysql') {
       // InnoDB answers a plain read from the transaction's snapshot and a
       // locking read from the latest rows. Rows this transaction has locked
@@ -348,7 +351,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
       // snapshot is seen as it was locked. (PostgreSQL's plain and locking
       // reads see the same rows; SQLite has one writer.)
       /** @type {StorageRow[]} */
-      const rows = await applyDatabaseReadOptions(query.clearSelect().select(`${tableName}.*`, identities).forShare())
+      const rows = await applyDatabaseReadOptions(query.clearSelect().select(...listColumns, identities).forShare())
       // A policy join can repeat a row.
       const records = [...new Map(rows.map(row => [String(row.id), row])).values()]
       return records.map(record => toJsonApiRecordWithBelongsTo(scope, record, scopeName))
@@ -358,7 +361,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
       query.clearSelect().distinct(`${tableName}.${idProperty}`)
       // Deduplicate policy joins by ID, without comparing JSON or other row values.
       /** @type {StorageRow[]} */
-      const records = await applyDatabaseReadOptions(storageAdapter.buildBaseQuery({ transaction: db }).whereIn(idProperty, query).select(`${tableName}.*`, identities))
+      const records = await applyDatabaseReadOptions(storageAdapter.buildBaseQuery({ transaction: db }).whereIn(idProperty, query).select(...listColumns, identities))
       return records.map(record => toJsonApiRecordWithBelongsTo(scope, record, scopeName))
     }
     const record = await applyDatabaseReadOptions(query.select(`${tableName}.*`, identities)).first()

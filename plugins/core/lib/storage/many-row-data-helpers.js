@@ -9,6 +9,7 @@ import { applyDatabaseReadOptions, databaseIdentityExpression, normalizeStoredFi
 import { currentKnexMysqlSchema, listKnexMysqlIndexes, listKnexUniqueKeyColumns } from '../dbIntrospection.js'
 import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
 import { applyInsertReturning, databaseFamily } from '../querying-writing/database-capabilities.js'
+import { blobRowsPerStatement } from '../querying-writing/blob-fields.js'
 import { loadRelationshipIdentifiers } from '../querying/relationship-identifiers.js'
 import { buildJsonApiResponse } from '../querying/knex-json-api-transformers-querying.js'
 import { deletePivotReferences } from '../writing/many-to-many-manipulations.js'
@@ -286,6 +287,11 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     return inputKeys.map(key => found.get(key))
   }
 
+  // The most rows a statement writing `columns` holds by their blobs (see blobRowsPerStatement).
+  const blobRows = (scopeName, storageAdapter, db, columns) => blobRowsPerStatement(
+    db, scopes[scopeName].vars.schemaInfo, field => storageAdapter.translateColumn(field), columns, api.knex.capabilities?.dbInfo?.maxAllowedPacket
+  )
+
   /**
    * Insert validated rows with one statement per chunk and column set.
    * Returns the stored identifier for each input row (undefined for rows an
@@ -340,7 +346,8 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
       const generated = Boolean(canonical) && !Object.hasOwn(storageRows[indexes[0]], idColumn)
       const returnColumn = generated ? CANONICAL_ROW_ID : idColumn
       const conflict = onConflict && !generated ? onConflict : undefined
-      for (const part of chunk(indexes, rowsPerStatement(db, chunkSize, columns.length + 1, { insert: true }))) {
+      const size = Math.min(rowsPerStatement(db, chunkSize, columns.length + 1, { insert: true }), blobRows(scopeName, storageAdapter, db, columns))
+      for (const part of chunk(indexes, size)) {
         const values = part.map(index => storageRows[index])
         let query = db(tableName).insert(values)
         // Only a clash on the conflict keys is skipped; any other unique index still fails.
@@ -462,14 +469,16 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const idColumn = storageAdapter.getIdColumn()
     const family = databaseFamily(db)
     const lockVersionColumn = context.schemaInfo.lockVersionField ? storageAdapter.translateColumn(context.schemaInfo.lockVersionField) : null
-    const columnCount = new Set(updates.flatMap(update => Object.keys(update.row))).size
+    const written = new Set(updates.flatMap(update => Object.keys(update.row)))
+    const columnCount = written.size
     const { matching, settle, locked } = await writeMatcher({ scopeName, context, runHooks, scoped, onlyIf, filters, lockMode })
     // onlyIf, the scope and the caller's ownership narrow each statement; without them every listed id is written.
     const guarded = scoped || Boolean(onlyIf) || hasWriteConditions(context, scopeName)
     const changed = []
 
     // A scoped statement binds each id twice, once more in its subquery.
-    for (const part of chunk(updates, rowsPerStatement(db, chunkSize, 2 * columnCount + (scoped ? 2 : 1)))) {
+    const size = Math.min(rowsPerStatement(db, chunkSize, 2 * columnCount + (scoped ? 2 : 1)), blobRows(scopeName, storageAdapter, db, written))
+    for (const part of chunk(updates, size)) {
       const set = {}
       const columns = [...new Set(part.flatMap(update => Object.keys(update.row)))]
       for (const column of columns) {

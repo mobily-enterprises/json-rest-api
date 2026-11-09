@@ -8,7 +8,7 @@ import { RestApiValidationError } from '../lib/rest-api-errors.js'
 const tables = { contacts: 'field_type_contacts' }
 const fields = {
   photo: { type: 'none', nullable: true, search: true },
-  bytes: { type: 'blob', nullable: true },
+  bytes: { type: 'blob', nullable: true, maxBytes: 1024 },
   workspace_id: { type: 'string', nullable: true },
   role: { type: 'string', nullable: true }
 }

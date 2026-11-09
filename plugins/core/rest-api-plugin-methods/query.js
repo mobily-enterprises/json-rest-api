@@ -13,6 +13,8 @@ import { getRequestContracts, validateRequestContractOrThrow } from '../lib/quer
 import { validateRequestedIncludes, filterToOneResponseLinkage, snapshotReadRecord } from './common.js'
 import { queryConstraint } from '../lib/querying/query-constraint.js'
 import { RestApiValidationError } from '../../../lib/rest-api-errors.js'
+import { assertBlobReads } from '../lib/querying-writing/blob-fields.js'
+import { effectivePageSize } from '../lib/querying/knex-pagination-helpers.js'
 
 /** @param {unknown} value */
 const validatePageSizeLimit = value => {
@@ -96,6 +98,7 @@ export default async function queryMethod ({
   })
 
   await validateRequestedFieldsets(context, scopes)
+  assertBlobReads({ context, scopes, scopeName, rows: effectivePageSize({ page: context.queryParams.page, vars, pageSizeLimit: context.pageSizeLimit }), operation: 'query' })
   validateRequestedIncludes(context, scopes)
   await runHooks('beforeData')
   await runHooks('beforeDataQuery')

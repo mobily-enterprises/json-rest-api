@@ -21,6 +21,7 @@ import {
 import {
   atIndex,
   manyRowResponse,
+  assertManyRowBlobReads,
   noHooks,
   refuseUnsupportedResource,
   rejectBulkOptions,
@@ -200,6 +201,7 @@ export default async function postManyMethod ({
     refuseUnsupportedResource({
       api, helpers, perRecordHooks, scopeName, schemaInfo: context.schemaInfo, operation: 'postMany', kind: 'post', storageHelper: 'dataInsertMany'
     })
+    assertManyRowBlobReads({ api, scopeName, context, returning: context.returning, queryParams: params.queryParams, rows: records.length })
     const conflict = resolveOnConflict(params.onConflict, { scopeName, schemaInfo: context.schemaInfo, scopes })
     if (conflict?.action === 'merge') {
       // Merged rows are updates: the resource must take patches as a batch too.

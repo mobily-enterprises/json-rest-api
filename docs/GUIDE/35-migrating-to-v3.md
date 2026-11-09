@@ -302,6 +302,25 @@ field NULL, also when an optional (`required: false`) filter does not resolve.
 | a `patch` or `put` of `accountId: null` by a writer who cannot see the account clears the link | keeps it; clear it in a system context |
 | `owner_type` and `owner_id` in attributes set a polymorphic link | refused; send `owner: { _type, id }` or `relationships.owner` |
 
+## Blob fields (3.1.2)
+
+A `blob` field was any value of any size, read by every list. From 3.1.2 it
+holds bytes within limits on every database (see
+[Blob Fields](../API.md#blob-fields)):
+
+| 3.1.1 | 3.1.2 |
+| --- | --- |
+| `{ type: 'blob' }` | needs `maxBytes`, the most bytes a value holds; registration refuses it otherwise, and refuses `maxBytes` on another type |
+| a blob with `search`, `unique`, `indexed` or a default | refused when the resource is added |
+| a blob on AnyAPI storage | refused when the resource is added; keep the resource on table storage |
+| `get` and `query` answer the blob | answered only when sparse fieldsets name it |
+| any page, include or HTTP response holds blobs | a read holds at most 16 MiB of named blobs or one record's; includes, `queryAll` and HTTP responses name none (rule `blob_read`) |
+| sort by a blob | refused |
+| a MySQL or MariaDB `blob` column (64 KiB) | `createKnexTable` picks the column type that holds `maxBytes`; the migration diff grows a smaller one |
+
+Upgrading: give each blob `maxBytes`, no more than its column holds, and name
+the blob in `queryParams.fields` where a read needs it.
+
 ## Text filters match literally (3.1.2)
 
 `contains`, `startsWith` and `endsWith` filters, and search fields built on them,

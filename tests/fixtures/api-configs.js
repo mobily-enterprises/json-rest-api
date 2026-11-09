@@ -3585,3 +3585,40 @@ export async function createCorsBaseUrlApi (knex, app) {
   })
   return api
 }
+
+// Albums with a small cover blob and photos with a 4 MiB and a 1 KiB blob.
+let blobApiCount = 0
+export async function createBlobFieldsApi (knex, { storage = storageMode.mode, includeExpress = false } = {}) {
+  const api = new JsonRestApi({ name: `blob-fields-${blobApiCount++}` })
+  await api.use(RestApiPlugin, { format: 'jsonapi', returning: 'full', queryDefaultLimit: 20, queryMaxLimit: 50 })
+  await useStoragePlugin(api, knex, { storage, tenantId: 'blob_fields' })
+  if (includeExpress) await api.use(ExpressPlugin, { mountPath: '/api' })
+  await api.addResource('albums', {
+    schema: { id: { type: 'id' }, name: { type: 'string', required: true }, cover: { type: 'blob', maxBytes: 200, nullable: true } },
+    relationships: { photos: { type: 'hasMany', target: 'photos', foreignKey: 'album_id' } },
+    tableName: 'blob_albums'
+  })
+  await api.addResource('photos', {
+    schema: {
+      id: { type: 'id' },
+      code: { type: 'string', required: true, unique: true, maxLength: 40, search: true },
+      title: { type: 'string', nullable: true, search: true },
+      bytes: { type: 'blob', maxBytes: 4 * 1024 * 1024, nullable: true },
+      thumb: { type: 'blob', maxBytes: 1024, nullable: true },
+      album_id: { type: 'id', belongsTo: 'albums', as: 'album', nullable: true, search: true }
+    },
+    tableName: 'blob_photos'
+  })
+  await api.resources.albums.createKnexTable()
+  await api.resources.photos.createKnexTable()
+  return api
+}
+
+// Registers one resource with `fields` beside its id, creating no table: for registration refusals.
+export async function registerBlobResource (knex, fields, { searchSchema } = {}) {
+  const api = new JsonRestApi({ name: `blob-refusal-${blobApiCount++}` })
+  await api.use(RestApiPlugin, { format: 'jsonapi' })
+  await useStoragePlugin(api, knex, { tenantId: 'blob_refusals' })
+  await api.addResource('scans', { schema: { id: { type: 'id' }, ...fields }, ...(searchSchema ? { searchSchema } : {}), tableName: 'blob_scans' })
+  return api
+}

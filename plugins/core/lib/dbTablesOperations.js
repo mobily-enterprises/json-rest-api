@@ -8,6 +8,7 @@ import { createKnexTransaction } from '../../../lib/knex-transaction.js'
 import { transactionMethod, withWriteOutcome } from '../../../lib/error-context.js'
 import { assertFieldNameMap } from './querying-writing/field-utils.js'
 import { getSchemaCapabilities } from './querying-writing/database-capabilities.js'
+import { mysqlBlobColumnBytes, mysqlBlobColumnType } from './querying-writing/blob-fields.js'
 
 const runOwnedTransaction = withWriteOutcome(transactionMethod)
 
@@ -611,6 +612,9 @@ function mapTypeToKnex (table, columnName, definition, options = {}) {
       return table.json(columnName)
 
     case 'blob':
+      // MySQL's BLOB holds 64 KiB; each binary type holds a maximum of its own.
+      return isMysqlDialect(dialect) && definition.maxBytes ? table.specificType(columnName, mysqlBlobColumnType(definition.maxBytes)) : table.binary(columnName)
+
     case 'file':
       return table.binary(columnName)
 
@@ -758,6 +762,15 @@ function buildColumnBuilderCode (columnName, definition, options = {}) {
         break
 
       case 'blob':
+        if (isMysqlDialect(dialect) && definition.maxBytes) {
+          line = `table.specificType(${quoteJsString(columnName)}, ${quoteJsString(mysqlBlobColumnType(definition.maxBytes))})`
+        } else if (!dialect && definition.maxBytes > 65535) {
+          throw new Error(`Field '${columnName}' is a blob of more than 64 KiB, whose MySQL column type a migration needs an explicit dialect to choose.`)
+        } else {
+          line = `table.binary(${quoteJsString(columnName)})`
+        }
+        break
+
       case 'file':
         line = `table.binary(${quoteJsString(columnName)})`
         break
@@ -939,6 +952,8 @@ function columnNeedsAlter (currentColumn, desiredColumn, options = {}) {
     Boolean(currentColumn.nullable) !== Boolean(desiredColumn.nullable) ||
     (compareUnsigned && Boolean(currentColumn.unsigned) !== Boolean(desiredColumn.unsigned)) ||
     (desiredColumn.shape === 'string' && (currentColumn.maxLength ?? null) !== desiredColumn.maxLength) ||
+    // A MySQL binary column that holds less than a blob's maxBytes grows to a type that holds it.
+    (compareUnsigned && desiredColumn.definition.type === 'blob' && (mysqlBlobColumnBytes(currentColumn.dataType) ?? Infinity) < desiredColumn.definition.maxBytes) ||
     (!sqlite && desiredColumn.shape === 'decimal' && (currentColumn.numericPrecision ?? null) !== desiredColumn.numericPrecision) ||
     (!sqlite && desiredColumn.shape === 'decimal' && (currentColumn.numericScale ?? null) !== desiredColumn.numericScale) ||
     (!sqlite && ['datetime', 'time'].includes(desiredColumn.shape) && (currentColumn.datetimePrecision ?? null) !== desiredColumn.datetimePrecision) ||

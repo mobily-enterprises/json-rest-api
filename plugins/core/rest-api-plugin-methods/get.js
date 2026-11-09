@@ -12,6 +12,7 @@ import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { validateRequestedIncludes, filterToOneResponseLinkage, snapshotReadRecord } from './common.js'
+import { assertBlobReads } from '../lib/querying-writing/blob-fields.js'
 
 /**
  * Read one resource using params.id and params.queryParams. Missing resources
@@ -96,6 +97,7 @@ export default async function getMethod ({
     try {
       await validateRequestedFieldsets(context, scopes)
       validateRequestedIncludes(context, scopes)
+      assertBlobReads({ context, scopes, scopeName, rows: 1, operation: 'get' })
     } catch (error) {
       // A missing row answers 404 before a bad fieldset, as with two reads.
       if (!(await helpers.dataGetMinimal({ scopeName, context: identityContext, runHooks }))) throw notFound()
@@ -120,6 +122,7 @@ export default async function getMethod ({
 
     await validateRequestedFieldsets(context, scopes)
     validateRequestedIncludes(context, scopes)
+    assertBlobReads({ context, scopes, scopeName, rows: 1, operation: 'get' })
     await runHooks('beforeData')
     await runHooks('beforeDataGet')
 
