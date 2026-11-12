@@ -105,7 +105,7 @@ export async function createAggregateApi (knex, { storage = storageMode.mode } =
   })
   await api.addResource('customers', {
     // A hidden ownership field, as an application hides its owner columns.
-    schema: { id: { type: 'id' }, name: { type: 'string', required: true }, workspace: { type: 'string', nullable: true, hidden: true } },
+    schema: { id: { type: 'id' }, name: { type: 'string', required: true, indexed: true }, workspace: { type: 'string', nullable: true, hidden: true } },
     relationships: { sales: { type: 'hasMany', target: 'sales', foreignKey: 'customerId' } },
     searchSchema: { saleRegion: { type: 'string', actualField: 'sales.region' } },
     autofilter: 'workspace',
@@ -117,7 +117,8 @@ export async function createAggregateApi (knex, { storage = storageMode.mode } =
     schema: {
       id: { type: 'id' },
       salesperson: { type: 'string', nullable: true, search: true },
-      region: { type: 'string', required: true, indexed: true, search: true },
+      // An index of its own in table storage; an indexed slot on AnyAPI.
+      region: { type: 'string', required: true, index: true, indexed: true, search: true },
       amount: { type: 'number', required: true },
       units: { type: 'integer', required: true },
       closed: { type: 'boolean', defaultTo: false, search: true },
@@ -131,6 +132,8 @@ export async function createAggregateApi (knex, { storage = storageMode.mode } =
       cents: { type: 'integer', nullable: true, getter: value => value == null ? null : value / 100 },
       customerId: { type: 'id', belongsTo: 'customers', as: 'customer', nullable: true, search: true }
     },
+    // A filter on the customer's name joins the customers table.
+    searchSchema: { customerName: { type: 'string', actualField: 'customers.name' } },
     rowPolicy: 'region',
     autofilter: 'workspace',
     tableName: 'aggregate_sales'

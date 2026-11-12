@@ -302,8 +302,10 @@ const measureValue = (value, measure, resourceType) => {
 
 /**
  * Run a compiled aggregate over the rows a filtered query selects.
- * The filtered query only supplies identifiers, so joins added by filters or
- * policies cannot repeat a row inside a group.
+ * A filtered query of the table alone is grouped as it reads, so the database
+ * reads only the rows its filters select, through their index, however many
+ * other rows the table holds. When filters or policies add joins, which could
+ * repeat a row inside a group, the filtered query only supplies identifiers.
  * @param {{ source: import('knex').Knex.QueryBuilder, sourceTable: string, storageAdapter: Record<string, any>, db: import('knex').Knex | import('knex').Knex.Transaction, plan: import('../storage/storage-types.js').AggregatePlan }} request
  */
 export async function runAggregateQuery ({ source, sourceTable, storageAdapter, db, plan }) {
@@ -313,10 +315,14 @@ export async function runAggregateQuery ({ source, sourceTable, storageAdapter, 
   }
   await checkNamedZones({ db, family, plan })
   const idColumn = storageAdapter.getIdColumn()
-  const ids = source.clearSelect().clearOrder().select(`${sourceTable}.${idColumn}`)
-  const query = storageAdapter.buildBaseQuery({ transaction: db, tableAlias: AGGREGATE_ALIAS })
-    .whereIn(`${AGGREGATE_ALIAS}.${idColumn}`, ids)
-  const column = field => `${AGGREGATE_ALIAS}.${storageAdapter.translateColumn(field)}`
+  const filtered = source.clearSelect().clearOrder()
+  const alone = !filtered._statements.some(statement => ['join', 'with', 'union'].includes(statement.grouping))
+  const alias = alone ? sourceTable : AGGREGATE_ALIAS
+  const query = alone
+    ? filtered
+    : storageAdapter.buildBaseQuery({ transaction: db, tableAlias: AGGREGATE_ALIAS })
+      .whereIn(`${AGGREGATE_ALIAS}.${idColumn}`, filtered.select(`${sourceTable}.${idColumn}`))
+  const column = field => `${alias}.${storageAdapter.translateColumn(field)}`
 
   for (const group of plan.groups) {
     if (group.bucket) {

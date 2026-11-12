@@ -1243,9 +1243,12 @@ NULL sorts as the lowest value on every database.
 
 `aggregate` checks permissions as a `query` (`method: 'query'`, with
 `originalContext.method === 'aggregate'`). Row policies, autofilters and other
-`knexQueryFiltering` hooks run with `queryPurpose: 'aggregate'`. The aggregate reads
-only the IDs the filtered query selects, so joins added by filters or policies
-never count a record twice.
+`knexQueryFiltering` hooks run with `queryPurpose: 'aggregate'`. The aggregate
+groups the rows the filtered query selects, read as that query reads them
+(through the filters' indexes), so its cost follows those rows, not the table.
+When filters or policies join other tables, which could repeat a row, it groups
+the table's rows whose IDs the filtered query selects, so no record counts
+twice.
 
 #### Examples
 

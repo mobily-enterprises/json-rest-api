@@ -351,4 +351,117 @@ describe(`Resource aggregates (${storageMode.mode})`, () => {
     const result = await aggregate({ measures: { internal: { sum: 'internal' } } })
     assert.deepEqual(result.data, [{ internal: 3 * sales.length }])
   })
+
+  // The aggregate statements an operation sends: those naming the first measure.
+  const aggregateStatements = async (run) => {
+    const statements = []
+    const listener = query => { if (/ as ["`]m0["`]/.test(query.sql)) statements.push(query) }
+    fixture.knex.on('query', listener)
+    try { await run() } finally { fixture.knex.off('query', listener) }
+    return statements
+  }
+
+  it('answers alike whether its filters join another table or not, under row policies and ownership', async () => {
+    // A filter on the customer's name joins customers, so the aggregate groups the rows whose
+    // ids the filtered query selects; a filter on the customer's id groups the filtered rows.
+    const measures = {
+      rows: { count: '*' },
+      regions: { countDistinct: 'region' },
+      total: { sum: 'amount' },
+      meanUnits: { avg: 'units' },
+      first: { min: 'closedOn' },
+      last: { max: 'closedAt' },
+      closedTotal: { sum: 'amount', where: { closed: true } }
+    }
+    const expectedOf = rows => group(rows, ['salesperson']).map(rows => {
+      const closed = rows.filter(row => row.closed)
+      return {
+        salesperson: rows[0].salesperson,
+        rows: rows.length,
+        regions: new Set(rows.map(row => row.region)).size,
+        total: sum(rows.map(row => row.amount)),
+        meanUnits: sum(rows.map(row => row.units)) / rows.length,
+        first: rows.map(row => row.closedOn).filter(Boolean).sort()[0] ?? null,
+        last: rows.map(row => row.closedAt).filter(Boolean).sort().at(-1) ?? null,
+        closedTotal: closed.length ? sum(closed.map(row => row.amount)) : null
+      }
+    }).sort(byKeys(['salesperson']))
+    const contexts = [{}, { workspace: 'w2' }, { region: 'north' }, { workspace: 'w2', region: 'north' }]
+    const statements = await aggregateStatements(async () => {
+      for (const context of contexts) {
+        const visible = sales.filter(row => row.customer === 2 && [row.workspace, undefined].includes(context.workspace) && [row.region, undefined].includes(context.region))
+        const joined = await aggregate({ groupBy: ['salesperson'], measures, queryParams: { filters: { customerName: 'Globex' } } }, { ...context })
+        const direct = await aggregate({ groupBy: ['salesperson'], measures, queryParams: { filters: { customerId: '2' } } }, { ...context })
+        assert.deepEqual(direct, joined, JSON.stringify(context))
+        assert.deepEqual(direct.data, expectedOf(visible), JSON.stringify(context))
+        const totals = await aggregate({ measures, queryParams: { filters: { customerName: 'Globex' } } }, { ...context })
+        assert.deepEqual(await aggregate({ measures, queryParams: { filters: { customerId: '2' } } }, { ...context }), totals, JSON.stringify(context))
+      }
+    })
+    // Each pair compared the two reads: the joined one by ids, the direct one not.
+    assert.deepEqual(statements.map(({ sql }) => sql.includes('__jra_aggregate')), contexts.flatMap(() => [true, false, true, false]))
+  })
+
+  // The rows a statement reads, as each database reports them. A small table hides whether a
+  // statement reads the table's other rows: a full scan costs less there than an index, and
+  // looking selected ids up one by one less than joining them, where on a large table
+  // PostgreSQL joins a long id list by hash over the whole table. So PostgreSQL, MySQL and
+  // MariaDB are asked to prefer an index wherever one applies and not to look ids up one by
+  // one. PostgreSQL 18 also folds a table's join to itself on its primary key into one read,
+  // which it cannot do for a partitioned table or before 18, so it is asked not to. SQLite
+  // reports no rows read: its plan stands in for them, and must reach every table through an
+  // index rather than scan it whole.
+  const rowsRead = async ({ sql, bindings }) => {
+    const statement = sql.replace(/\$\d+/g, '?')
+    if (databaseClient === 'pg') {
+      return fixture.knex.transaction(async (trx) => {
+        await trx.raw("select set_config(name, 'off', true) from pg_settings where name in ('enable_seqscan', 'enable_nestloop', 'enable_self_join_elimination')")
+        await trx.raw('set local max_parallel_workers_per_gather = 0')
+        const [{ Plan: plan }] = (await trx.raw(`explain (analyze, format json) ${statement}`, bindings)).rows[0]['QUERY PLAN']
+        const read = node => (node['Relation Name'] ? Math.round((node['Actual Rows'] + (node['Rows Removed by Filter'] ?? 0) + (node['Rows Removed by Index Recheck'] ?? 0)) * node['Actual Loops']) : 0) +
+          (node.Plans ?? []).reduce((total, child) => total + read(child), 0)
+        return read(plan)
+      })
+    }
+    if (databaseClient === 'mysql2') {
+      return fixture.knex.transaction(async (trx) => {
+        const handlerReads = async () => (await trx.raw("show session status like 'Handler_read%'"))[0].reduce((total, row) => total + Number(row.Value), 0)
+        await trx.raw("set session max_seeks_for_key = 1, optimizer_switch = 'semijoin=off'")
+        try {
+          const before = await handlerReads()
+          await trx.raw(statement, bindings)
+          return (await handlerReads()) - before
+        } finally { await trx.raw('set session max_seeks_for_key = default, optimizer_switch = default') }
+      })
+    }
+    const plan = (await fixture.knex.raw(`explain query plan ${statement}`, bindings)).map(row => row.detail)
+    assert.ok(plan.every(step => !/^SCAN (?!CONSTANT)/.test(step)), plan.join('\n'))
+    return plan.join('\n')
+  }
+
+  it('reads the rows its filters select, however many other rows the table holds', async () => {
+    let next = 1000
+    const write = (count, attributes) => fixture.api.resources.sales.postMany({
+      returning: 'minimal',
+      document: { data: Array.from({ length: count }, (_, index) => ({ type: 'sales', id: String(next++), attributes: { salesperson: `S${index % 7}`, amount: 1, units: 1, ...attributes(index) } })) }
+    })
+    // Planner statistics, as a live database keeps them; SQLite keeps none unless asked.
+    const analyze = () => databaseClient === 'mysql2'
+      ? fixture.knex.raw('analyze table ??', [storageMode.isAnyApi() ? 'any_records' : tables.sales])
+      : databaseClient === 'pg' && fixture.knex.raw('analyze')
+    // 490 rows of one region beside 500 of others, then beside ten times as many.
+    await write(490, () => ({ region: 'west' }))
+    const report = { groupBy: ['salesperson'], measures: { rows: { count: '*' }, total: { sum: 'amount' } }, queryParams: { filters: { region: 'west' }, page: { size: 4 } } }
+    const readsBeside = async (others) => {
+      await write(others, index => ({ region: `r${index % 10}` }))
+      await analyze()
+      let result
+      const [statement] = await aggregateStatements(async () => { result = await aggregate(report) })
+      return { result, read: await rowsRead(statement) }
+    }
+    const few = await readsBeside(500)
+    assert.deepEqual(few.result.data, [0, 1, 2, 3].map(index => ({ salesperson: `S${index}`, rows: 70, total: 70 })))
+    const many = await readsBeside(4500)
+    assert.deepEqual(many, few, `rows read beside 500 other rows: ${few.read}; beside 5,000: ${many.read}`)
+  })
 })

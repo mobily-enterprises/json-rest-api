@@ -403,6 +403,25 @@ through a view, a function or session state. A transaction that relies on one
 of those to hide a row it has already linked must not count on a later link
 check to refuse that row.
 
+## Aggregates read only the rows they group (3.1.7)
+
+| 3.1.6 | 3.1.7 |
+| --- | --- |
+| `aggregate` grouped the table's rows whose IDs the filtered query selected (`where id in (select id … where <filters>)`); that outer read named no filter, so the database could read every row of the table to find them | the filtered query is grouped as it reads, so only the rows its filters select are read, through their index |
+| a filter or row policy that joins another table: the IDs the filtered query selects | unchanged, since a join could repeat a row inside a group |
+
+What the old read cost depended on the planner. PostgreSQL 18 folds it back
+into one read when the table is not partitioned and the ID is its primary key;
+on a partitioned table, and before 18, once the selection held many rows it
+joined their IDs by hash over the whole table. MySQL and MariaDB read the whole
+table whenever they chose to start from it. A report over one owner's 115,000
+rows in a partitioned PostgreSQL 18 table of 8.6 million rows read all 8.6
+million in each of its four aggregates, 1.2 to 1.9 seconds each, and took 8.6
+seconds; it now reads the owner's rows through their index and takes 0.14
+seconds. Results are unchanged.
+
+Upgrading: none.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,
