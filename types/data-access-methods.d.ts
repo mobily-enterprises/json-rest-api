@@ -44,7 +44,11 @@ export interface UpsertOptions<Input extends object> {
 // The row lock of a lock read or patchWhere: 'update' (default) is FOR UPDATE. 'noKeyUpdate'
 // is FOR NO KEY UPDATE on PostgreSQL, which lets other transactions insert or change rows whose
 // foreign keys reference the locked ones; MySQL, MariaDB and SQLite take FOR UPDATE for it.
-export type LockMode = 'update' | 'noKeyUpdate'
+export type ExclusiveLockMode = 'update' | 'noKeyUpdate'
+// lockByIds and lockWhere also take 'share': FOR SHARE (LOCK IN SHARE MODE on MySQL and MariaDB),
+// which other readers and shared locks pass and writes and exclusive locks wait for. Never write
+// a row the same transaction holds shared: two transactions doing so deadlock.
+export type LockMode = ExclusiveLockMode | 'share'
 // patchWhere and deleteWhere need filters, or all: true to act on every visible row.
 export type WhereScope = { filters: Record<string, unknown>; all?: never } | { filters?: never; all: true }
 type Patchable<Input extends object> = { [Field in keyof Input]?: Input[Field] | RawValue }
@@ -103,7 +107,7 @@ export interface DataAccessMethods<
     context?: Context
   ): Promise<ManyRowResult<Format, Returning, Fields, Type>>
   patchWhere<Format extends ResourceFormat = DefaultFormat, Returning extends ManyRowReturning = 'none'>(
-    params: ManyRowWriteOptions<Format, Returning> & SharedPatchInput<Input, Type> & Omit<PatchConditionOptions<Input>, 'missing'> & WhereScope & { lockMode?: LockMode },
+    params: ManyRowWriteOptions<Format, Returning> & SharedPatchInput<Input, Type> & Omit<PatchConditionOptions<Input>, 'missing'> & WhereScope & { lockMode?: ExclusiveLockMode },
     context?: Context
   ): Promise<ManyRowResult<Format, Returning, Fields, Type>>
   deleteMany<Returning extends 'none' | 'minimal' | 'count' = 'none'>(
@@ -115,7 +119,7 @@ export interface DataAccessMethods<
     params: RemovedResourceOptions & WhereScope & { transaction?: ManagedTransaction; returning?: Returning; chunkSize?: number },
     context?: Context
   ): Promise<DeleteResult<Returning, Type>>
-  // Locks the visible rows among ids (FOR UPDATE, id order) until the transaction ends.
+  // Locks the visible rows among ids (FOR UPDATE, or the lockMode's lock; id order) until the transaction ends.
   lockByIds<Format extends ResourceFormat = DefaultFormat>(params: {
     ids: DirectResourceId[]
     transaction: ManagedTransaction | Knex.Transaction
@@ -141,7 +145,7 @@ export interface DataAccessMethods<
     // Stored fields, '-' for descending; default ['id'].
     sort?: string[]
     limit?: number
-    lockMode?: LockMode
+    lockMode?: ExclusiveLockMode
     format?: Format
     queryParams?: { fields?: Record<string, string> }
   }, context?: Context): Promise<RecordsResult<Format, Fields, Type>>

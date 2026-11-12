@@ -327,7 +327,7 @@ export async function patchWhereMethod (args) {
     }
     const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
     requireWhereScope({ filters, all: params.all, missing: params.missing, operation: 'patchWhere' })
-    const lockMode = resolveLockMode(params.lockMode)
+    const lockMode = resolveLockMode(params.lockMode, 'patchWhere')
     // The visible ids are read in the write's transaction, so open it first.
     await beginWriteTransaction(context, params.transaction, helpers.newTransaction, args.runHooks)
     context.db = context.transaction

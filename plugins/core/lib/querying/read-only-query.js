@@ -27,13 +27,19 @@ let insideBuilderMethod = 0
 const BUILDER_STATE = new Set(['client', '_single', '_statements'])
 
 // Outside Knex's methods the statement lists read as frozen copies, so code
-// cannot push, splice or edit a predicate in place. The single values (table,
-// limit, offset and the like) read as a plain copy: Knex's SQLite compiler
-// rewrites the copy's limit when it compiles the builder as a subquery, and a
-// change to the copy reaches no query.
+// cannot push, splice or edit a predicate in place. Each copied statement keeps
+// its prototype: a join is a JoinClause, whose `grouping: 'join'` lives on the
+// prototype, and a plain builder compiling this one as a subquery (whereExists,
+// whereIn, a joined or from-subquery) reads the copies, so a plain-object copy
+// dropped every join from the SQL. The single values (table, limit, offset and
+// the like) read as a plain copy: Knex's SQLite compiler rewrites the copy's
+// limit when it compiles the builder as a subquery, and a change to the copy
+// reaches no query.
+/** @param {object} entry */
+const statementCopy = entry => Object.freeze(Object.assign(Object.create(Object.getPrototypeOf(entry)), entry))
 /** @param {unknown} value */
 const stateCopy = value => {
-  if (Array.isArray(value)) return Object.freeze(value.map(entry => entry && typeof entry === 'object' ? Object.freeze({ ...entry }) : entry))
+  if (Array.isArray(value)) return Object.freeze(value.map(entry => entry && typeof entry === 'object' ? statementCopy(entry) : entry))
   return value && typeof value === 'object' ? { ...value } : value
 }
 

@@ -175,6 +175,75 @@ describe(`Data-access hardening (${storageMode.mode})`, () => {
       assert.throws(() => query.clone().modify(builder => builder.del()), RestApiScopedQueryReadOnlyError)
       assert.equal(await count(query.clone().modify(builder => builder.whereRaw('1 = 1'))), 3)
     })
+
+    // A plain builder compiles a read-only one as a subquery from its statement copies, which dropped every join
+    // before 3.1.5: the statement failed, or ran without the join's narrowing and matched more rows.
+    it('keeps its joins when a plain builder compiles it as a subquery, on every compiler', async () => {
+      for (const client of ['better-sqlite3', 'pg', 'mysql2']) {
+        const db = knexLib({ client, useNullAsDefault: true })
+        try {
+          // A join a predicate names, and one whose ON clause alone narrows.
+          const named = () => db('tasks as t').join('projects as p', 'p.id', 't.project_id').where('p.owner_id', 7)
+          const onOnly = () => db('notes as n').join('memberships as m', function () {
+            this.on('m.workspace_id', 'n.workspace_id').andOnVal('m.user_id', '=', 42)
+          })
+          const shapes = {
+            whereExists: wrap => db('docs').whereExists(wrap(onOnly().select(1).whereColumn('n.id', 'docs.note_id'))),
+            whereIn: wrap => db('docs').whereIn('note_id', wrap(onOnly().select('n.id'))),
+            joinedSubquery: wrap => db('docs').join(wrap(onOnly().select('n.id')).as('v'), 'v.id', 'docs.note_id'),
+            fromSubquery: wrap => db.from(wrap(onOnly().select('n.id')).as('v')).select('v.id'),
+            namedJoin: wrap => db('docs').whereExists(wrap(named().select(1).whereColumn('t.id', 'docs.task_id'))),
+            // A derived table over a read-only builder with a join (a JSKIT join source's shape), in a plain whereExists.
+            derivedTable: wrap => db('users as u').whereExists(
+              wrap(db.from(wrap(named().select('t.id', 't.owner_id')).as('k'))).select(1).whereColumn('k.owner_id', 'u.id')
+            )
+          }
+          for (const [shape, build] of Object.entries(shapes)) {
+            const plain = build(builder => builder).toSQL()
+            const readOnly = build(builder => readOnlyQueryBuilder(builder)).toSQL()
+            assert.match(plain.sql, /\bjoin\b/i, `${client} ${shape}`)
+            assert.equal(readOnly.sql, plain.sql, `${client} ${shape}`)
+            assert.deepEqual(readOnly.bindings, plain.bindings, `${client} ${shape}`)
+          }
+          // The copies still refuse changes, and a copied join is still a join.
+          const statements = readOnlyQueryBuilder(onOnly())._statements
+          const join = statements.find(statement => statement.joinType)
+          assert.equal(join.grouping, 'join', client)
+          assert.ok(Object.isFrozen(statements) && Object.isFrozen(join), client)
+          assert.throws(() => statements.push({ grouping: 'where', type: 'whereRaw', value: db.raw('1 = 1') }), TypeError, client)
+          assert.throws(() => { join.table = 'other' }, TypeError, client)
+        } finally {
+          await db.destroy()
+        }
+      }
+    })
+
+    it('keeps its joins when a plain builder runs it as a subquery', { skip: tableOnly }, async () => {
+      await resetAll()
+      const db = fixture.knex
+      const scoped = () => fixture.api.resources.da_entries.scopedQuery({ alias: 'e' }, workspaceA())
+      // Workspace A sees E1 to E3 (amounts 10, 20, 30). The join's ON clause alone keeps E2 and E3. It answers
+      // { query }, as scopedQuery does: an async function answering the builder itself would run it.
+      const narrowed = async () => {
+        const { query } = await scoped()
+        return { query: query.join('da_accounts as ja', function () { this.on('ja.id', 'e.account_id').andOnVal('e.amount', '>', 15) }) }
+      }
+      const expected = ['E2', 'E3']
+      const runs = {
+        topLevel: subquery => subquery.orderBy('e.code').pluck('e.code'),
+        whereExists: subquery => db('da_entries as o').whereExists(subquery.select(1).whereColumn('e.id', 'o.id')).orderBy('o.code').pluck('o.code'),
+        whereIn: subquery => db('da_entries').whereIn('id', subquery.select('e.id')).orderBy('code').pluck('code'),
+        joinedSubquery: subquery => db('da_entries as o').join(subquery.select('e.id').as('v'), 'v.id', 'o.id').orderBy('o.code').pluck('o.code'),
+        fromSubquery: subquery => db.from(subquery.select('e.code').as('v')).orderBy('v.code').pluck('v.code')
+      }
+      for (const [shape, run] of Object.entries(runs)) {
+        assert.deepEqual(await run((await narrowed()).query), expected, shape)
+      }
+      // A predicate on the joined table: without the join the statement fails.
+      const { query } = await scoped()
+      const named = query.join('da_accounts as ja', 'ja.id', 'e.account_id').where('ja.name', 'A visible').where('e.amount', '>', 15)
+      assert.deepEqual(await runs.whereExists(named), expected)
+    })
   })
 
   describe('upserts', { skip: tableOnly }, () => {

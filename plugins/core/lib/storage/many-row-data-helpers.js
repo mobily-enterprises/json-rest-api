@@ -25,6 +25,9 @@ const FOUND_ROWS = 0x2
 // The canonical AnyAPI table's own row id, behind each row's logical id.
 const CANONICAL_ROW_ID = 'id'
 
+// The row locks lockRows takes (see resolveLockMode).
+const LOCK_MODES = new Set(['update', 'noKeyUpdate', 'share'])
+
 /** A column's value as text, for a canonical row's logical id. @param {any} db @param {string} column */
 const textOf = (db, column) => db.raw(databaseFamily(db) === 'mysql' ? 'CAST(?? AS CHAR)' : 'CAST(?? AS TEXT)', [column])
 
@@ -597,15 +600,20 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
   }
 
   /**
-   * FOR UPDATE, or with lockMode 'noKeyUpdate' on PostgreSQL FOR NO KEY UPDATE,
-   * which does not block another transaction's foreign key checks on the rows.
+   * FOR UPDATE; with lockMode 'noKeyUpdate' on PostgreSQL FOR NO KEY UPDATE,
+   * which does not block another transaction's foreign key checks on the rows
+   * (elsewhere FOR UPDATE); with 'share' FOR SHARE, which Knex writes LOCK IN
+   * SHARE MODE on MySQL and MariaDB. SQLite takes no row lock. Another mode
+   * throws instead of locking as for 'update'.
    * @param {any} query @param {import('knex').Knex} db
-   * @param {{ skipLocked?: boolean, lockMode?: 'update' | 'noKeyUpdate' }} [options]
+   * @param {{ skipLocked?: boolean, lockMode?: 'update' | 'noKeyUpdate' | 'share' }} [options]
    */
   const lockRows = (query, db, { skipLocked = false, lockMode = 'update' } = {}) => {
+    if (!LOCK_MODES.has(lockMode)) throw new TypeError(`Unknown row lock mode ${JSON.stringify(lockMode)}: it is 'update', 'noKeyUpdate' or 'share'`)
     const family = databaseFamily(db)
     if (family === 'sqlite') return query
-    if (lockMode === 'noKeyUpdate' && family === 'pg') query.forNoKeyUpdate()
+    if (lockMode === 'share') query.forShare()
+    else if (lockMode === 'noKeyUpdate' && family === 'pg') query.forNoKeyUpdate()
     else query.forUpdate()
     return skipLocked ? query.skipLocked() : query
   }
@@ -634,7 +642,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
    * first: under REPEATABLE READ (MySQL, MariaDB) it would fix the snapshot
    * before the lock wait, hiding what the lock holder commits meanwhile.
    * Returns the rows the locking read saw as a JSON:API document.
-   * @param {{ scopeName: string, context: any, runHooks: Function, ids: Array<string | number>, lockMode?: 'update' | 'noKeyUpdate' }} request
+   * @param {{ scopeName: string, context: any, runHooks: Function, ids: Array<string | number>, lockMode?: 'update' | 'noKeyUpdate' | 'share' }} request
    */
   const dataLockByIds = async ({ scopeName, context, runHooks, ids, lockMode }) => {
     const { query, storageAdapter, tableName, idColumn } = await lockingQuery({ scopeName, context, runHooks, operation: 'lockByIds', purpose: 'lock' })
@@ -694,7 +702,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
    * order, except on MySQL, where the read is forced onto the index that
    * lockIndexFor picks and the rows come in its order, as ORDER BY id could
    * walk the primary key.
-   * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, limit: number, lockMode?: 'update' | 'noKeyUpdate' }} request
+   * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, limit: number, lockMode?: 'update' | 'noKeyUpdate' | 'share' }} request
    */
   const dataLockWhere = async ({ scopeName, context, runHooks, filters, limit, lockMode }) => {
     const read = async () => {

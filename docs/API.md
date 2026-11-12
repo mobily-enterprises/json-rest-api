@@ -1385,7 +1385,14 @@ changes nothing, then read.
 other writers of the rows but lets other transactions insert or change rows
 whose foreign keys reference them. Use it when the transaction will not change
 the locked rows' primary key or the unique columns foreign keys reference.
-MySQL, MariaDB and SQLite take their usual lock for either mode.
+MySQL, MariaDB and SQLite take their usual lock for either mode. `lockByIds`
+and `lockWhere` also take `'share'`: `FOR SHARE` on PostgreSQL and `LOCK IN
+SHARE MODE` on MySQL and MariaDB, which other reads and shared locks pass and
+writes, deletes and exclusive locks wait for, for a check whose rows must not
+change until the transaction ends. Never write a row the transaction holds
+shared: two transactions that each hold it shared and then write it deadlock.
+`claim` and `patchWhere` refuse `'share'`, and any other mode is a
+`RestApiValidationError` (rule `lock_mode`) before any statement.
 
 A resource option `lockVersionField: 'lock_version'` names a stored integer
 that every update (single, many-row and upsert merge) sets to `column + 1`.

@@ -113,20 +113,31 @@ export function resolveMissing (value) {
   return value
 }
 
+// Why claim and patchWhere take no shared lock.
+const NO_SHARE = Object.freeze({
+  claim: 'a shared lock would let another worker claim the same row',
+  patchWhere: 'it writes the rows it selects, and two transactions that each hold a row shared and then write it deadlock'
+})
+
 /**
  * The row lock a lock read or patchWhere takes. 'noKeyUpdate' takes FOR NO KEY
  * UPDATE on PostgreSQL, which lets other transactions insert or update rows
  * whose foreign keys reference the locked ones; elsewhere it is FOR UPDATE.
+ * 'share', for lockByIds and lockWhere only, takes FOR SHARE (LOCK IN SHARE
+ * MODE on MySQL and MariaDB): other transactions may still read the rows and
+ * share-lock them, but not change, delete or exclusively lock them until it ends.
  * @param {unknown} value
- * @returns {'update' | 'noKeyUpdate'}
+ * @param {string} operation The method: 'claim' and 'patchWhere' refuse 'share'.
+ * @returns {'update' | 'noKeyUpdate' | 'share'}
  */
-export function resolveLockMode (value) {
+export function resolveLockMode (value, operation) {
   if (value === undefined) return 'update'
-  if (value !== 'update' && value !== 'noKeyUpdate') {
-    const message = "lockMode is 'update' or 'noKeyUpdate'"
-    throw new RestApiValidationError(message, { fields: ['lockMode'], violations: [{ field: 'lockMode', rule: 'lock_mode', message }] })
-  }
-  return value
+  const shares = !Object.hasOwn(NO_SHARE, operation)
+  if (value === 'update' || value === 'noKeyUpdate' || (value === 'share' && shares)) return value
+  const message = value === 'share'
+    ? `${operation} takes lockMode 'update' or 'noKeyUpdate', not 'share': ${NO_SHARE[operation]}`
+    : `lockMode is 'update', 'noKeyUpdate'${shares ? " or 'share'" : ''}`
+  throw new RestApiValidationError(message, { fields: ['lockMode'], violations: [{ field: 'lockMode', rule: 'lock_mode', message }] })
 }
 
 /**

@@ -348,6 +348,18 @@ updates a row the write links to must lock it `FOR UPDATE` in
 `beforeProcessing` (or the method's processing hook), no longer in
 `beforeDataCall`, which now runs after the shared lock is taken.
 
+## Read-only subqueries and shared locks (3.1.5)
+
+| 3.1.4 | 3.1.5 |
+| --- | --- |
+| a plain Knex builder taking a read-only builder (a `scopedQuery`, or `readOnlyQueryBuilder`'s) as a subquery (`whereExists`, `whereIn`, a joined or `from` subquery) compiled it without its joins: an error when a predicate named a joined table, otherwise the subquery ran without the joins' narrowing and matched more rows | the joins compile; the statement lists still read as frozen copies outside Knex's own methods |
+| `lockMode` is `'update'` or `'noKeyUpdate'` | `lockByIds` and `lockWhere` also take `'share'` (`FOR SHARE`; `LOCK IN SHARE MODE` on MySQL and MariaDB); `claim` and `patchWhere` refuse it with `RestApiValidationError` (rule `lock_mode`) |
+
+Upgrading: none. A subquery that passed only because its joins were dropped
+now applies them, so check the results of plain builders that took a read-only
+one. See [Lock mode](34-scoped-reads-and-locks.md#lock-mode) for when a shared
+lock fits.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

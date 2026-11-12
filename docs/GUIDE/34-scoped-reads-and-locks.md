@@ -220,7 +220,10 @@ statement lists (`_statements`, `_single`) or its statement kind, and defining
 properties throw `RestApiScopedQueryReadOnlyError`, on clones too. Read from
 outside Knex's own methods, `_statements` is a frozen copy, so it cannot be
 changed in place either, and `_single` is a copy, so changing it changes no
-query. The builder
+query. Each copied statement keeps its kind (a join stays a join), so a plain
+Knex builder that takes the read-only one as a subquery (`whereExists`,
+`whereIn`, a joined or `from` subquery) compiles its joins too; before 3.1.5
+it dropped them, and the subquery ran without the joins' narrowing. The builder
 guards against mistakes, not hostile code: code that means to bypass it can use
 Knex directly. A table you join is not scoped by the builder; join only what
 the caller may see, or scope it with its own `scopedQuery`.
@@ -425,14 +428,37 @@ reference them, also through this library, whose writes check a belongs-to
 parent with `FOR KEY SHARE` on PostgreSQL. A many-to-many link to a locked row
 still waits. The default, `'update'`, keeps
 `FOR UPDATE`. MySQL, MariaDB and SQLite have no such mode and take the locks in
-the table above for either value. Any other value fails with
-`RestApiValidationError` before a statement runs.
+the table above for either value.
 
 ```js
 await api.transaction(async transaction => {
   // Child rows that reference these accounts can still be inserted meanwhile.
   await api.resources.accounts.lockByIds({ ids, lockMode: 'noKeyUpdate', transaction }, context)
   await api.resources.accounts.patchWhere({ filters: { status: 'open' }, data: { balance_checked_at: new Date() }, lockMode: 'noKeyUpdate', transaction }, context)
+})
+```
+
+A check that only reads rows and needs them unchanged until the transaction
+ends (a membership that must stay active while a document is filed under it)
+passes `lockMode: 'share'` to `lockByIds` or `lockWhere`. PostgreSQL takes
+`FOR SHARE`, and MySQL and MariaDB `LOCK IN SHARE MODE`: other transactions
+still read the rows and take shared locks on them, so concurrent checks do not
+queue behind each other, but an update, a delete or an exclusive lock of the
+rows waits until the transaction ends. A shared lock is for reading only: never
+update or delete a row in the transaction that holds it shared. When two
+transactions hold the same row shared and each then writes it, each waits for
+the other, and the database ends the deadlock by failing one of them. Lock a
+row you will write with `'update'` from the start. On SQLite a shared lock
+takes the write lock, as the other modes do. `claim` and `patchWhere` refuse
+`'share'`, since a claimed row is taken to be worked on and `patchWhere` writes
+its rows. Any other value fails with `RestApiValidationError` before a
+statement runs.
+
+```js
+await api.transaction(async transaction => {
+  // Other filings may check the same membership at once; a change to it waits until this commits.
+  await api.resources.memberships.lockByIds({ ids: [membershipId], lockMode: 'share', transaction }, context)
+  await api.resources.filings.post({ data: filing, transaction }, context)
 })
 ```
 

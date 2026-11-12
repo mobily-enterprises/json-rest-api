@@ -517,24 +517,27 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
     }
     const insertChild = transaction => fixture.api.resources.da_lm_children.post({ data: { parent: '1' }, returning: 'none', transaction }, anyContext())
 
-    it('refuses an unknown lock mode before any statement', async () => {
+    it('refuses an unknown lock mode, and share on claim and patchWhere, before any statement', async () => {
       await seedParents()
       const control = /^\s*(begin|commit|rollback|savepoint|release|start transaction|set transaction)\b/i
       const statements = []
       const record = ({ sql }) => { if (!control.test(sql)) statements.push(sql) }
       fixture.knex.on('query', record)
       try {
-        for (const [name, hold] of Object.entries(holds)) {
+        const refused = [...Object.keys(holds).map(name => [name, 'exclusive']), ['claim', 'share'], ['patchWhere', 'share']]
+        for (const [name, lockMode] of refused) {
+          const label = `${name} ${lockMode}`
           statements.length = 0
           let refusal
           // A refused patchWhere rolls back the transaction it joined, so each hold has its own.
           await fixture.api.transaction(async transaction => {
-            refusal = await hold(transaction, 'share').then(() => undefined, error => error)
+            refusal = await holds[name](transaction, lockMode).then(() => undefined, error => error)
             if (refusal) throw refusal
           }).catch(() => {})
-          assert.equal(refusal?.code, 'REST_API_VALIDATION', name)
-          assert.ok(JSON.stringify(refusal.details).includes('lockMode'), name)
-          assert.deepEqual(statements, [], name)
+          assert.equal(refusal?.code, 'REST_API_VALIDATION', label)
+          assert.ok(JSON.stringify(refusal.details).includes('lockMode'), label)
+          if (lockMode === 'share') assert.match(cause(refusal).message, new RegExp(`^${name} takes lockMode 'update' or 'noKeyUpdate', not 'share'`), label)
+          assert.deepEqual(statements, [], label)
         }
         // The listener sees a transaction's statements.
         await fixture.api.transaction(transaction => transaction('da_lm_parents').count({ rows: '*' }))
@@ -570,8 +573,53 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
       }
     })
 
-    it('claim with noKeyUpdate skips a row another transaction holds in either mode', { skip: !serverDatabase && 'SQLite has one writer' }, async () => {
-      for (const lockMode of ['update', 'noKeyUpdate']) {
+    it('takes FOR SHARE with share (LOCK IN SHARE MODE on MySQL and MariaDB, the write lock alone on SQLite)', async () => {
+      const lockClause = { pg: /\bfor share\b/i, mysql2: /\block in share mode\b/i }[databaseClient]
+      for (const name of ['lockByIds', 'lockWhere']) {
+        await seedParents()
+        const { result, sql } = await fixture.measure(() => fixture.api.transaction(transaction => holds[name](transaction, 'share')))
+        assert.deepEqual(result.data.map(record => String(record.id)), ['1'], name)
+        const locking = sql.filter(statement => /\bfor (update|share|no key update|key share)\b|\block in share mode\b/i.test(statement))
+        if (lockClause) assert.ok(locking.length > 0 && locking.every(statement => lockClause.test(statement)), `${name}: ${sql.join(' | ')}`)
+        else assert.deepEqual(locking, [], name)
+      }
+    })
+
+    it('with share lets reads, shared locks and child inserts through, and holds writes and exclusive locks', { skip: !serverDatabase && 'SQLite has one writer' }, async () => {
+      const others = {
+        'lockByIds share': [transaction => holds.lockByIds(transaction, 'share'), 'proceeds'],
+        'lockWhere share': [transaction => holds.lockWhere(transaction, 'share'), 'proceeds'],
+        'plain read': [transaction => parents().get({ id: '1', transaction }, anyContext()), 'proceeds'],
+        // PostgreSQL's foreign key check takes FOR KEY SHARE and InnoDB's a shared lock: neither waits for a shared lock.
+        'child insert': [insertChild, 'proceeds'],
+        'lockByIds update': [transaction => holds.lockByIds(transaction, 'update'), 'waits'],
+        'lockByIds noKeyUpdate': [transaction => holds.lockByIds(transaction, 'noKeyUpdate'), 'waits'],
+        'lockWhere update': [transaction => holds.lockWhere(transaction, 'update'), 'waits'],
+        patch: [transaction => parents().patch({ id: '1', data: { note: 'changed' }, returning: 'none', transaction }, anyContext()), 'waits']
+      }
+      for (const holder of ['lockByIds', 'lockWhere']) {
+        for (const [name, [work, expected]] of Object.entries(others)) {
+          await seedParents()
+          const { outcome } = await outcomeWhileHeld({ hold: transaction => holds[holder](transaction, 'share'), work })
+          assert.equal(outcome, expected, `${holder} share, then ${name}`)
+        }
+      }
+    })
+
+    it('the lock helpers refuse an unknown mode instead of locking as for update', async () => {
+      await seedParents()
+      const lock = transaction => fixture.api.helpers.dataLockByIds({
+        scopeName: 'da_lm_parents',
+        context: { db: transaction, schemaInfo: parents().vars.schemaInfo, method: 'lockByIds', queryParams: {} },
+        runHooks: async () => {},
+        ids: ['1'],
+        lockMode: 'exclusive'
+      })
+      await assert.rejects(fixture.api.transaction(lock), error => /^Unknown row lock mode "exclusive"/.test(cause(error).message))
+    })
+
+    it('claim with noKeyUpdate skips a row another transaction holds in any mode', { skip: !serverDatabase && 'SQLite has one writer' }, async () => {
+      for (const lockMode of ['update', 'noKeyUpdate', 'share']) {
         await seedParents()
         const { outcome, result } = await outcomeWhileHeld({
           hold: transaction => holds.lockByIds(transaction, lockMode),
