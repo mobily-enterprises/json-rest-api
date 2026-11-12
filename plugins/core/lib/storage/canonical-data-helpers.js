@@ -17,6 +17,7 @@ import { serializeJsonApiQuery } from '../querying-writing/connectors-query-pars
 import { deleteFoundRow, foundRow, lockFoundRow, updateFoundRow } from './single-row-writes.js'
 import { whereInIdentifiers } from '../querying/identifier-query.js'
 import { lockTargetRows } from '../writing/relationship-processor.js'
+import { lockStrength, transactionChecks } from '../querying-writing/transaction-checks.js'
 
 /** @param {StorageRow} row @param {CanonicalDescriptor} descriptor */
 function requireCanonicalResourceId (row, descriptor) {
@@ -286,7 +287,10 @@ export function createCanonicalDataHelpers ({
       .where(canonical.tenantColumn, descriptor.tenant)
     const values = ids?.map(value => storageAdapter.translateFilterValue('id', value))
     if (values === undefined) query.where(logicalIdColumn, id)
-    else query.modify(whereInIdentifiers, logicalIdColumn, values).distinct(`${canonical.tableName}.${logicalIdColumn}`)
+    else query.modify(whereInIdentifiers, logicalIdColumn, values)
+    // The id list's predicate: a check's scope is the rest of its query (see transaction-checks.js).
+    const idPredicate = /** @type {any} */ (query)._statements.at(-1)
+    if (values !== undefined) query.distinct(`${canonical.tableName}.${logicalIdColumn}`)
 
     if (typeof applyQueryFilters === 'function') {
       const scopedQueryState = await applyQueryFilters({
@@ -347,6 +351,16 @@ export function createCanonicalDataHelpers ({
     if (values !== undefined) {
       // Filtering owns predicates; the id list owns its identity projection.
       query.clearSelect().distinct(`${canonical.tableName}.${logicalIdColumn}`)
+      // A check of ids alone, in a transaction, is answered as the ordinary dataGetMinimal answers it.
+      const checks = idsOnly ? transactionChecks(context.db) : undefined
+      const checkScope = checks?.scopeOf(query, idPredicate, logicalIdColumn)
+      const strength = lockStrength(lock, context.db)
+      if (checks && checkScope) {
+        const requested = [...new Set((ids || []).map(String))]
+        const known = checks.known(checkScope, requested, strength)
+        if (requested.every(requestedId => known.has(requestedId))) return requested.map(knownId => ({ type: descriptor.resource, id: knownId }))
+      }
+      const started = checks?.started() ?? 0
       let rows = storageAdapter.buildBaseQuery({ transaction: context.db })
       // A locking read names the ids itself, as the ordinary dataGetMinimal explains.
       if (lock) rows = lockTargetRows(rows.modify(whereInIdentifiers, logicalIdColumn, values).orderBy(`${canonical.tableName}.${logicalIdColumn}`), lock, context.db)
@@ -354,6 +368,7 @@ export function createCanonicalDataHelpers ({
       if (idsOnly) rows.select(`${canonical.tableName}.${logicalIdColumn}`)
       /** @type {StorageRow[]} */
       const records = await applyDatabaseReadOptions(rows)
+      if (checks && checkScope) checks.remember(checkScope, records.map(row => requireCanonicalResourceId(row, descriptor)), strength, started)
       return records.map(row => idsOnly ? { type: descriptor.resource, id: requireCanonicalResourceId(row, descriptor) } : toMinimal(row))
     }
     if (locked && databaseFamily(context.db) === 'mysql') query.forShare()

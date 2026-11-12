@@ -440,7 +440,11 @@ PostgreSQL such a parent takes `FOR KEY SHARE`, the lock its foreign key checks
 take, so a transaction holding the parent with `lockMode: 'noKeyUpdate'` does
 not block them either (see [Lock mode](34-scoped-reads-and-locks.md#lock-mode)).
 In a [system context](34-scoped-reads-and-locks.md#system-contexts), a
-belongs-to whose declared foreign key protects it is left to that key. Other
+belongs-to whose declared foreign key protects it is left to that key. Within
+one transaction, a row already checked in the same scope under a lock at least
+as strong is not read again until the transaction sends a statement that could
+change the answer (see
+[link checks within a transaction](35-migrating-to-v3.md#link-checks-within-a-transaction-316)). Other
 relationship locks are taken after the `beforeDataCall` hooks. A many-to-many
 target keeps `FOR SHARE`, which serializes two writes that add one edge from
 its opposite ends. A target the write also changes, such as a versioned parent

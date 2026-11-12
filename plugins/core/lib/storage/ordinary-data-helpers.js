@@ -23,6 +23,7 @@ import { applyDatabaseReadOptions, databaseIdentityExpression } from '../queryin
 import { whereInIdentifiers } from '../querying/identifier-query.js'
 import { columnsWithoutBlobs } from '../querying-writing/blob-fields.js'
 import { lockTargetRows } from '../writing/relationship-processor.js'
+import { lockStrength, transactionChecks } from '../querying-writing/transaction-checks.js'
 
 /**
  * Every update advances the resource's lock version by one, whatever the input says.
@@ -312,7 +313,9 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     let query = values === undefined
       ? table.where(idProperty, id)
       : /** @type {typeof table} */ (table.modify(whereInIdentifiers, idProperty, values))
-          .distinct(`${tableName}.${idProperty}`)
+    // The id list's predicate: a check's scope is the rest of its query (see transaction-checks.js).
+    const idPredicate = /** @type {any} */ (query)._statements.at(-1)
+    if (values !== undefined) query.distinct(`${tableName}.${idProperty}`)
 
     if (typeof applyQueryFilters === 'function') {
       const scopedQueryState = await applyQueryFilters({
@@ -365,6 +368,18 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     if (values !== undefined) {
       // Filtering owns predicates; the id list owns its identity projection.
       query.clearSelect().distinct(`${tableName}.${idProperty}`)
+      // A check of ids alone, in a transaction, is answered by the transaction's
+      // own earlier check of the same rows in the same scope, at the same or a
+      // stronger lock, when nothing sent since could have changed it.
+      const checks = idsOnly ? transactionChecks(db) : undefined
+      const checkScope = checks?.scopeOf(query, idPredicate, idProperty)
+      const strength = lockStrength(lock, db)
+      if (checks && checkScope) {
+        const requested = [...new Set((ids || []).map(String))]
+        const known = checks.known(checkScope, requested, strength)
+        if (requested.every(requestedId => known.has(requestedId))) return requested.map(knownId => ({ type: scopeName, id: knownId }))
+      }
+      const started = checks?.started() ?? 0
       // Deduplicate policy joins by ID, without comparing JSON or other row values.
       let rows = storageAdapter.buildBaseQuery({ transaction: db })
       // A locking read names the ids itself, so it reads and locks only their
@@ -372,6 +387,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
       if (lock) rows = lockTargetRows(rows.modify(whereInIdentifiers, idProperty, values).orderBy(`${tableName}.${idProperty}`), lock, db)
       /** @type {StorageRow[]} */
       const records = await applyDatabaseReadOptions(rows.whereIn(idProperty, query).select(...(idsOnly ? [{ id: identities.id }] : [...listColumns, identities])))
+      if (checks && checkScope) checks.remember(checkScope, records.map(record => String(record.id)), strength, started)
       return records.map(record => idsOnly ? { type: scopeName, id: String(record.id) } : toJsonApiRecordWithBelongsTo(scope, record, scopeName))
     }
     // A record this transaction has locked, read as its locking reads see it (see above).

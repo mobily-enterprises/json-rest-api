@@ -36,6 +36,7 @@
     "plugins/core/lib/querying-writing/query-field-helpers.js",
     "plugins/core/lib/querying-writing/knex-field-helpers.js",
     "plugins/core/lib/querying-writing/database-capabilities.js",
+    "plugins/core/lib/querying-writing/transaction-checks.js",
     "tests/types/**/*.js",
     "tests/types/**/*.ts"
   ]

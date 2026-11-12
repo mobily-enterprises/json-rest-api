@@ -3,6 +3,7 @@ import { validateRelationshipDataCardinality } from '../querying-writing/relatio
 import { whereInIdentifiers } from '../querying/identifier-query.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 import { databaseFamily } from '../querying-writing/database-capabilities.js'
+import { lockStrength, transactionChecks } from '../querying-writing/transaction-checks.js'
 
 export const lockRelationshipParent = async ({ context, helpers, scopeName }) => {
   if (!context.transaction) return
@@ -79,12 +80,26 @@ export const lockRelationshipTargets = async (api, transaction, identifiers, { e
   // id list as one parameter where the database limits parameters. Types lock
   // in name order and each statement in id order, so two writers naming the same
   // targets in different orders take their locks in the same order.
+  const checks = transactionChecks(transaction)
   for (const [type, { adapter, group, found }] of [...resources].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) {
     const idColumn = adapter.getIdColumn()
-    const rows = await applyDatabaseReadOptions(lockTargetRows(adapter.buildBaseQuery({ transaction })
-      .modify(whereInIdentifiers, idColumn, group.map(target => target.value))
-      .orderBy(`${adapter.getTableName()}.${idColumn}`), { exclusive: isExclusive(type), keyShare }, transaction).select({ [idColumn]: databaseIdentityExpression(transaction, idColumn) }))
+    const lock = { exclusive: isExclusive(type), keyShare }
+    const query = adapter.buildBaseQuery({ transaction }).modify(whereInIdentifiers, idColumn, group.map(target => target.value))
+    // The transaction's own earlier lock of these rows, at this strength or a
+    // stronger one, answers when nothing sent since could have changed it.
+    const checkScope = checks?.scopeOf(query, query._statements.at(-1), idColumn)
+    const strength = lockStrength(lock, transaction)
+    const requested = group.map(target => String(target.value))
+    const known = checkScope ? checks.known(checkScope, requested, strength) : new Set()
+    if (requested.every(id => known.has(id))) {
+      for (const id of known) found.add(id)
+      continue
+    }
+    const started = checks?.started()
+    const rows = await applyDatabaseReadOptions(lockTargetRows(query.orderBy(`${adapter.getTableName()}.${idColumn}`), lock, transaction)
+      .select({ [idColumn]: databaseIdentityExpression(transaction, idColumn) }))
     for (const row of rows) found.add(String(row[idColumn]))
+    if (checkScope) checks.remember(checkScope, rows.map(row => String(row[idColumn])), strength, started)
   }
   for (const { type, id, value, adapter } of targets) {
     let storedId = String(value)

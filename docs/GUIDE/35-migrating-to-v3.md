@@ -360,6 +360,49 @@ now applies them, so check the results of plain builders that took a read-only
 one. See [Lock mode](34-scoped-reads-and-locks.md#lock-mode) for when a shared
 lock fits.
 
+## Link checks within a transaction (3.1.6)
+
+A transaction from `api.transaction` (or a write's own) answers a link check,
+or the check of a to-one link a response shows, from its own earlier check of
+the same row when that check sent the same statement (the same table, and the
+same ownership, row policy and filter predicates with the same values) under a
+lock at least as strong, and the transaction has sent nothing since that could
+change the answer:
+
+| 3.1.5 | 3.1.6 |
+| --- | --- |
+| every write read each row it links to, and every response each to-one link it shows | a transaction reads each row once per scope and lock, until it sends a statement that could change the answer |
+| a write linking rows of one table reads them with one statement | unchanged: the rows the transaction has not already checked, with one statement |
+
+A transaction checks a row again after it inserts into or updates a table the
+check's statement names (a row policy's subqueries included), after an update
+that sets a column any remembered check names (an ownership column such as
+`workspace_id`, or an id), and after a delete, an upsert, a savepoint's
+rollback or release, or any other statement. A check that found no row is not
+remembered, the hooks that build a check's statement still run for every
+check, and nothing is remembered outside a transaction or from one transaction
+to the next. Installing a module (a form and a module, each with a version it
+publishes, every row naming its author and publisher) in one transaction sent
+55 statements and now sends 30; 32 modules in one transaction sent 1,698 and
+now send 836, of which 162 are checks instead of 1,024: the two users every row
+names are checked twice instead of 480 times, on MariaDB 11.4 and PostgreSQL
+alike.
+
+A remembered answer holds for the rest of the transaction as of its first
+check. Under REPEATABLE READ (MySQL's and MariaDB's default) a repeated check
+would read the same rows from the transaction's snapshot or its locks. Under
+READ COMMITTED (PostgreSQL's default) each statement sees other transactions'
+latest commits, so a row another transaction moves out of scope after this one
+checked it is no longer refused by this transaction's later links to it, as it
+already was not for the links made before the move.
+
+Upgrading: none. The library sees the statements a transaction sends, not what
+the database does by itself: a trigger's writes, a foreign key cascade from a
+key column no remembered check names, or a row policy that reads a table only
+through a view, a function or session state. A transaction that relies on one
+of those to hide a row it has already linked must not count on a later link
+check to refuse that row.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

@@ -1,4 +1,5 @@
 import { whereInIdentifiers } from './identifier-query.js'
+import { LOCK_STRENGTH, transactionChecks } from '../querying-writing/transaction-checks.js'
 import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-writing/knex-field-helpers.js'
 import { applyIncludeQueryConfig } from './knex-window-queries.js'
 import { buildEffectiveSortList } from './query-field-sort-helpers.js'
@@ -213,7 +214,9 @@ export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, cont
     // whereInIdentifiers binds a long id list as one parameter where the database limits parameters.
     const query = adapter.buildBaseQuery({ transaction: context.transaction })
       .modify(whereInIdentifiers, column, values)
-      .distinct({ [idColumn]: adapter.isCanonical() ? column : databaseIdentityExpression(knex, column) })
+    // The id list's predicate: a check's scope is the rest of its query (see transaction-checks.js).
+    const idPredicate = query._statements.at(-1)
+    query.distinct({ [idColumn]: adapter.isCanonical() ? column : databaseIdentityExpression(knex, column) })
     const state = scoped
       ? await applyScopeFiltersToIncludeQuery({
         query,
@@ -225,8 +228,23 @@ export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, cont
         queryPurpose: 'relationship-identifiers'
       })
       : { query: applyDatabaseReadOptions(query) }
-    if (locked && databaseFamily(knex) === 'mysql') state.query.forShare()
+    const lockedRead = locked && databaseFamily(knex) === 'mysql'
+    // In a transaction, the transaction's own earlier check of these rows in this
+    // scope answers, when nothing sent since could have changed it.
+    const checks = transactionChecks(context.transaction)
+    const checkScope = checks?.scopeOf(state.query, idPredicate, idColumn)
+    const strength = lockedRead ? LOCK_STRENGTH.share : LOCK_STRENGTH.none
+    if (checkScope) {
+      const known = checks.known(checkScope, ids, strength)
+      if (known.size === ids.size) {
+        for (const id of known) visibleIds.add(id)
+        continue
+      }
+    }
+    const started = checks?.started()
+    if (lockedRead) state.query.forShare()
     for (const row of await state.query) visibleIds.add(String(row[idColumn]))
+    if (checkScope) checks.remember(checkScope, visibleIds, strength, started)
   }
   return identifiers.filter(({ type, id }) => visible.get(type)?.has(String(id)))
 }

@@ -1215,6 +1215,57 @@ export async function createLinkCheckApi (knex, { storage = storageMode.mode, ow
   return api
 }
 
+// People a row policy narrows to the caller's workspace, hiding archived people
+// and, on ordinary tables, people listed in tc_blocked; notes link to them.
+export async function createTransactionCheckApi (knex, { storage = storageMode.mode } = {}) {
+  const api = new JsonRestApi({ name: 'transaction-checks' })
+  await api.use(RestApiPlugin, { format: 'jsonapi', returning: 'none' })
+  await useStoragePlugin(api, knex, { storage, tenantId: 'transaction_checks' })
+  if (storage === 'knex') {
+    await knex.schema.createTable('tc_blocked', table => {
+      table.increments('id')
+      table.integer('person_id').notNullable()
+    })
+  }
+  const sameWorkspace = ({ query, context, system, column, value }) => {
+    if (system) return true
+    if (context.workspace === undefined) return false
+    query.where(column('workspace'), value('workspace', context.workspace))
+    return true
+  }
+  await api.use(RowPolicyPlugin, {
+    policies: {
+      workspaceNotes: sameWorkspace,
+      workspacePeople: params => {
+        if (params.system) return true
+        if (!sameWorkspace(params)) return false
+        params.query.where(params.column('archived'), false)
+        if (storage === 'knex') params.query.whereNotIn(params.column('id'), params.db('tc_blocked').select('person_id'))
+        return true
+      }
+    }
+  })
+  await api.addResource('tc_people', {
+    schema: { id: { type: 'id' }, name: { type: 'string', max: 40 }, workspace: { type: 'string', max: 10 }, archived: { type: 'boolean', defaultTo: false } },
+    rowPolicy: 'workspacePeople'
+  })
+  await api.addResource('tc_notes', {
+    schema: {
+      id: { type: 'id' },
+      title: { type: 'string', max: 40 },
+      workspace: { type: 'string', max: 10 },
+      author_id: { type: 'id', nullable: true, belongsTo: 'tc_people', as: 'author' },
+      editor_id: { type: 'id', nullable: true, belongsTo: 'tc_people', as: 'editor' }
+    },
+    rowPolicy: 'workspaceNotes'
+  })
+  for (const name of ['tc_people', 'tc_notes']) {
+    await api.resources[name].createKnexTable()
+    mapTable(knex, api, name, name)
+  }
+  return api
+}
+
 export async function seedCanonicalLinkRows (knex, rows) {
   for (let offset = 0; offset < rows.length; offset += 100) {
     await knex('any_links').insert(rows.slice(offset, offset + 100))
