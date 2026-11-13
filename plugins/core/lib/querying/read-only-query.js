@@ -14,6 +14,19 @@ const FORBIDDEN_METHODS = new Set([
 // The statement kinds a SELECT-only builder may run.
 const READ_METHODS = new Set(['select', 'first', 'pluck'])
 
+// Each read-only view's builder, for the library's own compile-time copies (a
+// lock read's subqueries take a lock: see subquery-locks.js).
+/** @type {WeakMap<object, object>} */
+const viewedBuilders = new WeakMap()
+
+/**
+ * The builder behind a read-only view from readOnlyQueryBuilder, or undefined
+ * for any other value. Library-internal: the package does not export it.
+ * @param {unknown} value
+ * @returns {any}
+ */
+export const readOnlyViewTarget = value => value !== null && typeof value === 'object' ? viewedBuilders.get(value) : undefined
+
 /** @param {unknown} value */
 const isQueryBuilder = value => value !== null && typeof value === 'object' &&
   typeof /** @type {{ toSQL?: unknown }} */ (value).toSQL === 'function' &&
@@ -94,5 +107,6 @@ export function readOnlyQueryBuilder (builder, { resourceType = 'query' } = {}) 
       return Reflect.deleteProperty(target, property)
     }
   })
+  viewedBuilders.set(proxy, builder)
   return proxy
 }

@@ -302,8 +302,10 @@ in the transaction what the lock holder committed while it waited (and with
 `ER_CHECKREAD`). After a lock, plain reads in the same transaction see what the
 previous holder committed, as long as the transaction made no plain read
 before the lock. Some plain reads can still come first or run inside the
-statement, and start the snapshot: subqueries of a row policy (InnoDB reads a
-locking read's subqueries without locks, from the snapshot), the scope
+statement, and start the snapshot: the subqueries of a `claim`'s row policy
+(InnoDB reads a locking read's subqueries without locks, from the snapshot,
+unless they lock too, as `lockByIds` and `lockWhere` make them: see
+[A lock's row policy reads current rows](#a-locks-row-policy-reads-current-rows)), the scope
 subquery of a selection write's locking read on MySQL (`patchWhere`,
 `deleteWhere`), a `checkPermissions` or `knexQueryFiltering` hook that queries
 the database, and the first `lockWhere` for a MySQL table and set of filtered
@@ -454,6 +456,89 @@ it fails with `SQLITE_READONLY` on a read-only connection. In WAL mode, a
 transaction that has already read keeps that snapshot, and if another
 connection has written since, taking the write lock fails with
 `SQLITE_BUSY_SNAPSHOT`; roll back and run the transaction again.
+
+### A lock's row policy reads current rows
+
+A row policy usually decides visibility through other tables: a `whereExists`
+over the caller's membership, a `whereIn` over grants. In `lockByIds` and
+`lockWhere`, every SELECT nested in the locking read's conditions takes a
+shared lock of its own: `FOR SHARE` on PostgreSQL, `LOCK IN SHARE MODE` on
+MySQL and MariaDB, whatever the lock's `lockMode`. That covers the row policy's
+subqueries at any depth, written as callbacks, over builders, over read-only
+builders, inside a `where` group, or over another resource's `scopedQuery`
+(the derived table and the read of it), and any subquery a filter or another
+`knexQueryFiltering` hook adds. Existing policies need no change.
+
+```js
+// The policy is unchanged. In a lock its subquery takes FOR SHARE (LOCK IN SHARE MODE on MySQL and MariaDB).
+await api.use(RowPolicyPlugin, {
+  policies: {
+    member: ({ query, context, column }) => {
+      query.whereExists(function () {
+        this.select(1).from('memberships')
+          .whereColumn('memberships.workspace_id', column('workspace_id'))
+          .where('memberships.user_id', context.userId)
+      })
+      return true
+    }
+  }
+})
+```
+
+A locking read reads the latest committed rows, so the lock decides from the
+membership and grant rows as they are now. A plain subquery inside a locking
+read does not: under REPEATABLE READ on MySQL and MariaDB it answers from the
+snapshot of the transaction's first plain read, so before 3.1.10 a member
+removed since that read still locked and read the rows, and a grant added,
+revoked or moved since was ignored. The shared lock also waits for a
+transaction that is changing a deciding row, and keeps those rows unchanged
+until this transaction ends, so the decision holds as long as the lock does.
+
+The lock is shared on purpose. A shared lock is enough to read the deciding
+rows as last committed and to keep their writers out until commit. An exclusive
+one (`FOR UPDATE`) would also make every other lock that reads the same
+membership or grant row wait, so the locks of one workspace's members would run
+one at a time. With the shared lock, two locks that decide from the same rows
+run at once, a transaction that changes one of those rows waits until they
+commit, and a lock waits for a transaction that has changed one and not yet
+committed. As with any shared lock, two transactions that each lock through the
+policy and then write the same deciding row deadlock, and the database fails
+one of them: change a membership or grant in a transaction that does not lock
+through it, or retry.
+
+The deciding rows are therefore locked until commit, and a change to a
+membership or grant waits for the locks that read it. On MySQL and MariaDB a
+locking subquery locks every row it examines, and the gaps between them, so
+give the policy's subqueries an index that finds the deciding rows directly
+(the membership's workspace and user, the grant's user and project); a
+subquery over a whole table, such as a `scopedQuery` of a resource without
+ownership, locks all of its rows. With MariaDB's `innodb_snapshot_isolation`
+on, a deciding row written since the transaction's snapshot may fail the lock
+with errno 1020 (`ER_CHECKREAD`) rather than be read as committed, and on
+PostgreSQL at REPEATABLE READ or SERIALIZABLE a deciding row changed or
+deleted since the snapshot fails it as a serialization failure (`40001`):
+retry the transaction.
+
+PostgreSQL's default READ COMMITTED gives each statement the rows committed
+when it began, so there a plain subquery missed a change only when the lock
+waited: a writer that held the row and also revoked its grant committed during
+the wait, and PostgreSQL rechecked the row against the grant as it was. With
+the lock, the subquery waits for that writer and reads what it committed. A
+PostgreSQL statement still finds no row committed after it began, so a grant
+added, or moved onto a row, while the lock waits is not seen by that
+statement: `lockWhere` reads again under its locks until no new row appears
+and finds it; `lockByIds` answers as of its statement and leaves that row out.
+
+A SELECT the database refuses a lock clause on stays a plain read, and the
+SELECTs nested in it still lock: on PostgreSQL one with `DISTINCT`,
+`GROUP BY`, `HAVING`, an aggregate, an outer join or a set operation; on MySQL
+and MariaDB one with a set operation. A subquery written as raw SQL text
+(`whereRaw('exists (select …)')`) keeps its text, so write a policy's
+subqueries with the builder (`whereRaw('exists ?', [builder])` locks the
+builder). SQLite takes no row locks, and nothing changes there. `claim` never
+waits for a lock, so its subqueries stay plain reads, as do those of every
+read that takes no lock, a selection write's scope (`patchWhere`,
+`deleteWhere`) and a `scopedQuery` with `purpose: 'lock'` included.
 
 ### Lock mode
 

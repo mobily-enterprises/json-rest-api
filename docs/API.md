@@ -1385,7 +1385,13 @@ index must read the rows in that order, and throws
 `RestApiBulkWriteUnsupportedError` when the table has no such index.
 `claim` takes up to `limit` (default 1, at most 1,000) matching rows that no
 other transaction holds (`SKIP LOCKED`), in `sort` order (stored fields, default
-`['id']`). A row policy that joins tables is refused for all three. On SQLite,
+`['id']`). A row policy that joins tables is refused for all three. In
+`lockByIds` and `lockWhere`, every SELECT nested in the read's conditions (a
+row policy's `whereExists` or `whereIn`, a filter's) takes a shared lock,
+`FOR SHARE` on PostgreSQL and `LOCK IN SHARE MODE` on MySQL and MariaDB,
+whatever `lockMode`: the lock decides from those rows as last committed rather
+than from the transaction's snapshot, waits for a transaction changing them,
+and keeps them unchanged until commit. `claim` keeps its subqueries plain. On SQLite,
 which has one writer, they take the database's write lock with a write that
 changes nothing, then read.
 

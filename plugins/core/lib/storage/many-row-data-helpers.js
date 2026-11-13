@@ -4,6 +4,7 @@
 // MySQL never sees an UPDATE or DELETE whose subquery reads its own table.
 import { RestApiBulkInsertIdsError, RestApiBulkWriteUnsupportedError, RestApiResourceError, RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 import { withQueryFilteringContext } from '../querying/query-builder-utils.js'
+import { lockConditionSubqueries } from '../querying/subquery-locks.js'
 import { ANY_OWNER, applyWriteConditions, hasWriteConditions, writeConditions } from '../querying/query-constraint.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression, normalizeStoredFieldValue } from '../querying-writing/database-value-normalizers.js'
 import { currentKnexMysqlSchema, listKnexMysqlIndexes, listKnexUniqueKeyColumns } from '../dbIntrospection.js'
@@ -628,7 +629,10 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
   // The scoped query of a lock or claim, refused unless it is still a SELECT on
   // the resource's own table: FOR UPDATE on a derived table or a common table
   // expression locks nothing and reads the transaction snapshot, and InnoDB
-  // would lock every joined row the read examines.
+  // would lock every joined row the read examines. A lock's subqueries (a row
+  // policy's, a filter's) lock the rows they read, shared, so it decides from
+  // the rows as last committed (see subquery-locks.js). A claim never waits for
+  // a lock, so its subqueries stay plain reads.
   const lockingQuery = async ({ scopeName, context, runHooks, operation, purpose, filters }) => {
     const storageAdapter = adapterFor(scopeName)
     const tableName = storageAdapter.getTableName()
@@ -639,6 +643,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
       const message = `${operation} on '${scopeName}' needs a single-table query, but its filters or row policy add ${what}`
       throw new RestApiValidationError(message, { fields: ['filters'], violations: [{ field: 'filters', rule: `${purpose}_single_table`, message }] })
     }
+    if (purpose === 'lock') lockConditionSubqueries(query, context.db)
     await takeSqliteWriteLock(context.db, tableName, storageAdapter.getIdColumn())
     return { query, storageAdapter, tableName, idColumn: `${tableName}.${storageAdapter.getIdColumn()}` }
   }

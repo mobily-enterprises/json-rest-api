@@ -459,6 +459,29 @@ statement later, so give its filters an index. With MariaDB's
 snapshot fails with errno 1020; retry the transaction. PostgreSQL and SQLite
 are unchanged.
 
+## A lock's row policy reads current rows (3.1.10)
+
+| 3.1.9 | 3.1.10 |
+| --- | --- |
+| `lockByIds` and `lockWhere` locked their own rows only; a row policy's subqueries (a `whereExists` over a membership, a `whereIn` over grants) were plain reads, which on MySQL and MariaDB under REPEATABLE READ answer from the snapshot of the transaction's first plain read: a member removed since still locked and read the rows, and a grant added, revoked or moved since was ignored | every SELECT nested in the locking read's conditions (a row policy's, at any depth and in any form the builder writes, and a filter's) takes a shared lock, `FOR SHARE` on PostgreSQL and `LOCK IN SHARE MODE` on MySQL and MariaDB, whatever `lockMode`, so the lock decides from the deciding rows as last committed, waits for a transaction changing them, and keeps them unchanged until commit |
+| on PostgreSQL a lock that waited for a writer of its row rechecked the row against the policy's rows as they were when the statement began | the policy's subqueries wait for their own writers and read what they committed |
+
+See [A lock's row policy reads current rows](34-scoped-reads-and-locks.md#a-locks-row-policy-reads-current-rows)
+for why the lock is shared, the SELECTs a database refuses one on (they stay
+plain reads) and what PostgreSQL's statements still cannot see.
+
+Upgrading: no policy changes. Hand-written locking SQL that repeated a policy's
+subqueries with their own lock clause, to make the decision current, can go:
+call `lockByIds` or `lockWhere` instead. A lock now holds its policy's deciding
+rows shared until commit, so a transaction that changes a membership or grant
+waits for the locks that read it; on MySQL and MariaDB give the policy's
+subqueries indexes that find those rows directly, since a locking read locks
+every row it examines. With MariaDB's `innodb_snapshot_isolation` on, and on
+PostgreSQL at REPEATABLE READ or SERIALIZABLE, a deciding row changed since the
+transaction's snapshot can fail the lock (errno 1020; `40001`) where 3.1.9
+answered from the snapshot: retry the transaction. `claim`, SQLite and every
+read that takes no lock are unchanged.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

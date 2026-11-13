@@ -296,7 +296,7 @@ Policies are reused for the resource selections that define externally visible d
 | `relationship-parent` | The parent of a relationship route such as `getRelated`. |
 | `report` | A `scopedQuery()` builder with the default purpose. |
 | `bulk-write` | The visible ids a many-row patch or delete may change, and `scopedQuery({ purpose: 'bulk-write' })`. |
-| `lock` | The rows `lockByIds()` and `lockWhere()` lock, in the locking read itself. A policy that joins other tables is refused here, as for `claim`. |
+| `lock` | The rows `lockByIds()` and `lockWhere()` lock, in the locking read itself. A policy that joins other tables is refused here, as for `claim`. Each subquery the policy adds takes a shared lock (`FOR SHARE`, `LOCK IN SHARE MODE` on MySQL and MariaDB), so the lock decides from the rows it reads as last committed and keeps them until the transaction ends: see [A lock's row policy reads current rows](34-scoped-reads-and-locks.md#a-locks-row-policy-reads-current-rows). |
 | `claim` | The candidate rows `claim()` takes. A policy that joins other tables is refused here, because the database would lock the joined rows too. |
 | `unspecified` | A custom call to the lower-level query-filtering seam did not provide a purpose. |
 
