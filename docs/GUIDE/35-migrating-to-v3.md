@@ -422,6 +422,28 @@ seconds. Results are unchanged.
 
 Upgrading: none.
 
+## Lock order, lock limits and fewer statements (3.1.8)
+
+| 3.1.7 | 3.1.8 |
+| --- | --- |
+| `lockWhere` locked every match, in id order (on MySQL and MariaDB in the order of the index it forces) | also takes `sort`, which locks and returns the rows in that order, then by id, and `limit` (1 to 1,000), which locks only the first rows of that order, by id without a `sort` |
+| on PostgreSQL `lockWhere` always read a second time under its locks, so locking one row was two statements | it reads again only while it holds fewer rows than its `limit`: `lockWhere` with `limit: 1` that finds its row is one statement, as `lockByIds` is; without a `limit`, unchanged |
+| on MySQL and MariaDB each `lockWhere` first read the connection's schema (`SELECT DATABASE()`) | once per Knex client whose connection settings name a database; at every call for a client that names none |
+| a response's to-one link was read for visibility unless the context was a system context and a declared foreign key protects the link | also in any other context when the target has no ownership fields, as well as no row policy and no filtering hook of the app's own: that read would return every linked id. A write's link checks are unchanged, and SQLite still reads every link |
+
+On MySQL and MariaDB a `sort` or `limit` needs an index that reads the rows in
+the lock's order (see [Row locks](34-scoped-reads-and-locks.md#row-locks)),
+since InnoDB locks rows in the order it reads them; without one `lockWhere`
+throws `RestApiBulkWriteUnsupportedError`, naming the columns, before any lock.
+A lock of one row by a unique key the filters fix whole needs no other index.
+
+Upgrading: none for a `lockWhere` without the new options. A `USE` on a pooled
+connection of a client whose settings name a database no longer moves
+`lockWhere`'s index search to the other schema: give each database a client
+of its own, or leave the database out of the client's settings. A test or
+budget that counts a read's statements counts one fewer for each linked type
+that now needs no read.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

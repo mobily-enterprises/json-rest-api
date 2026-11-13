@@ -471,7 +471,8 @@ export const validateRelationshipTargets = async (context, targets, helpers, api
   const needsNoRead = (/** @type {LinkTarget} */ item) => {
     const scope = scopes[item.type]
     const names = hookNames
-    if (!locks || !names || !scope || exclusive(item.type) || readsRecords(scope) || !linksToOne(item)) return false
+    // Only a system context: another caller's missing target answers not_found, not a foreign key error.
+    if (!isSystemContext(context) || !locks || !names || !scope || exclusive(item.type) || readsRecords(scope) || !linksToOne(item)) return false
     return [...(item.relationships || [])].every(relationshipName => linkNeedsNoRead({
       context, scopes, hookNames: names, sourceType: context.scopeName, relationshipName, targetType: item.type
     }))
@@ -733,17 +734,22 @@ function foreignKeyProtects (schemaInfo, field, column, target, targetIdColumn) 
 }
 
 /**
- * Whether a to-one link needs no visibility read: in a system context, to a
- * table resource with no row policy and no filtering hook of the app's own, a
- * declared foreign key keeps the link from pointing at a missing row, and the
- * context sees every other. SQLite enforces foreign keys only on connections
- * that turn them on, so there the link is always read.
+ * Whether a to-one link needs no visibility read: to a table resource that
+ * narrows nothing for this context (no row policy, no filtering hook of the
+ * app's own, and no ownership predicate: a system context, or a table with no
+ * autofilter owners), a declared foreign key keeps the link from pointing at a
+ * missing row, and the context sees every other. The read would answer every
+ * linked id, so leaving it out changes no answer (a write leaves out its link
+ * checks only in a system context: see validateRelationshipTargets). SQLite
+ * enforces foreign keys only on connections that turn them on, so there the
+ * link is always read.
  * @param {{ context: ResourceContext, scopes: Record<string, LifecycleResource>, hookNames: (event: string, scope: LifecycleResource) => string[], sourceType: string, relationshipName: string, targetType: string }} link
  */
 function linkNeedsNoRead ({ context, scopes, hookNames, sourceType, relationshipName, targetType }) {
   const target = scopes[targetType]
-  const targetVars = /** @type {LifecycleVars & { rowPolicy?: unknown }} */ (target?.vars)
-  if (!isSystemContext(context) || !target || targetVars?.rowPolicy || databaseFamily(context.db) === 'sqlite') return false
+  const targetVars = /** @type {LifecycleVars & { rowPolicy?: unknown, schemaInfo?: { autofilter?: { filters?: unknown[] } } }} */ (target?.vars)
+  const owned = (targetVars?.schemaInfo?.autofilter?.filters?.length ?? 0) > 0
+  if (!target || targetVars?.rowPolicy || (owned && !isSystemContext(context)) || databaseFamily(context.db) === 'sqlite') return false
   if (hookNames('knexQueryFiltering', target).some(name => !LIBRARY_FILTERING_HOOKS.has(name))) return false
   const sourceAdapter = resolveScopeStorageAdapter(scopes, sourceType, context.db)
   const targetAdapter = resolveScopeStorageAdapter(scopes, targetType, context.db)

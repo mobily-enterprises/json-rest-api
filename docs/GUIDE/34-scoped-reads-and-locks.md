@@ -355,22 +355,49 @@ locks at most 1,000 rows and throws `RestApiRowLimitError` when more match. Use
 it, not `scopedQuery`, to lock by filter: the scoped builder is a read-only
 derived table that cannot lock.
 
+`sort` and `limit` choose the order and the number. `lockWhere({ filters, sort:
+['module_key', 'id'], transaction })` locks the rows in `sort` order (stored
+fields, `'-'` for descending), then by id, and returns them in it, so
+transactions that lock overlapping rows take them in one order and wait for
+each other rather than deadlock. `lockWhere({ filters, limit: 1, transaction
+})` locks only the first `limit` rows (1 to 1,000) of that order, by id without
+a `sort`, and throws no `RestApiRowLimitError`: a check whether any row
+matches, or the lock of one row by a unique key other than its id, is then one
+statement, as `lockByIds` is, since PostgreSQL reads again only while it holds
+fewer rows than the limit. PostgreSQL sorts the rows it finds, then locks them
+in that order; a row whose sort columns another transaction changed while the
+lock waited is returned with its new values, so it can come out of order, as
+PostgreSQL documents for `ORDER BY` with `FOR UPDATE`. An invalid `sort` or
+`limit` throws `RestApiValidationError` before any statement.
+
 On MySQL and MariaDB, InnoDB locks every row a locking read examines, and every
 gap between them, until commit. Ordering by id could make it walk the primary
-key across every owner's rows, so there `lockWhere` has no `ORDER BY` and
-forces (`FORCE INDEX`) an index that keeps the read inside the caller's rows;
-rows come in that index's order. The index's leading columns must be the whole
+key across every owner's rows, so there `lockWhere` forces (`FORCE INDEX`) an
+index that keeps the read inside the caller's rows, and without `sort` or
+`limit` has no `ORDER BY`: rows come in that index's order. The index's leading columns must be the whole
 ownership (autofilter) columns the read is limited to (a prefix index on them
 does not count), or, when no ownership condition applies, it must start with a
 column the filters compare. Among those, an index whose next column the filters
 compare is preferred. Invisible (MySQL) and ignored (MariaDB) indexes cannot be
-forced and do not count. Without such an index `lockWhere` throws
-`RestApiBulkWriteUnsupportedError` before locking anything. Each call reads the
-connection's schema with `SELECT DATABASE()`, which reads no table, so one pool
-can serve several databases. The first call for a schema, table and set of
-columns also reads the table's indexes, in the transaction, and the index it
-picks is remembered while the process runs: restart after changing the
-indexes of a table that `lockWhere` uses.
+forced and do not count. With `sort` or `limit`, InnoDB also locks the rows in
+the order it reads them, and a sort it cannot read from the index would lock
+every match before it sorts, so the index must read them in that order: after
+the columns the read fixes to one value (the ownership columns, and the
+filters' single-value equalities), it holds the sort's columns, each whole and
+ascending, and then the id or nothing (InnoDB ends every secondary index with
+the primary key), and the sort's fields go one way, as InnoDB reads an index
+forward or backward. Among those, the index that fixes most columns is used. A
+unique key that the filters fix whole needs nothing more. Without such an
+index `lockWhere` throws `RestApiBulkWriteUnsupportedError` before locking
+anything, naming the columns the index needs. The index's search reads the
+connection's schema with `SELECT DATABASE()`, which reads no table, once for
+each Knex client whose connection settings name a database (each of its
+pooled connections uses that one; a `USE` on a pooled connection is not
+followed), and at every call for a client that names none, so one pool can
+serve several databases with `USE`. The first call for a schema, table, set of
+columns and order also reads the table's indexes, in the transaction, and the
+index it picks is remembered while the process runs: restart after changing
+the indexes of a table that `lockWhere` uses.
 
 No ownership condition applies to a resource without ownership fields, to a
 system context, or to a resource that has only a row policy, which is not an
@@ -390,8 +417,8 @@ database would lock the joined rows too.
 
 | Database | `lockByIds` | `lockWhere` | `claim` |
 | --- | --- | --- | --- |
-| PostgreSQL | `FOR UPDATE` on the visible ids | `FOR UPDATE`, read again until no new row appears | `FOR UPDATE SKIP LOCKED` |
-| MySQL 8, MariaDB 10.6+ | `FOR UPDATE` on the listed ids, hidden ones included (above) | `FOR UPDATE` without `ORDER BY`, forced onto an index that starts with the ownership or a filtered column | reads candidates, then locks windows of them by primary key on the bare table with `SKIP LOCKED` (InnoDB locks every row a locking read examines), and reads the held rows again under the lock to drop any that stopped matching |
+| PostgreSQL | `FOR UPDATE` on the visible ids | `FOR UPDATE`, read again until no new row appears (or `limit` rows are held) | `FOR UPDATE SKIP LOCKED` |
+| MySQL 8, MariaDB 10.6+ | `FOR UPDATE` on the listed ids, hidden ones included (above) | `FOR UPDATE`, forced onto an index that starts with the ownership or a filtered column, without `ORDER BY` unless `sort` or `limit` asks one the index reads in | reads candidates, then locks windows of them by primary key on the bare table with `SKIP LOCKED` (InnoDB locks every row a locking read examines), and reads the held rows again under the lock to drop any that stopped matching |
 | SQLite | the write lock, then a scoped read | the write lock, then a scoped read | the write lock, then a scoped read |
 
 On MySQL and MariaDB the candidate read of `claim` is a plain read, the only way
@@ -514,8 +541,11 @@ With a system context:
   API) whose column a declared foreign key protects (`references` on the field,
   or the resource's `foreignKeys`): the context sees every row of the target,
   and the key keeps the link from pointing at a missing one, so it needs no
-  read. SQLite enforces foreign keys only on connections that turn them on, so
-  there every link is read;
+  read. Any context sees every row of such a target that has no ownership
+  fields either, so its links need no read in any context (since 3.1.8);
+  outside a system context an owned target's links are still read. SQLite
+  enforces foreign keys only on connections that turn them on, so there every
+  link is read;
 - a write's belongs-to link to such a target is not checked with a read either:
   the foreign key checks the target, and locks it, when the write stores the
   link, so a missing target fails with the database's foreign key error rather

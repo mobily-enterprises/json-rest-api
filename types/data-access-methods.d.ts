@@ -131,9 +131,16 @@ export interface DataAccessMethods<
   // Locks the visible rows the filters select (FOR UPDATE; id order, on MySQL the
   // order of the forced index, which starts with the ownership or a filtered column),
   // waiting for other transactions; throws RestApiRowLimitError past 1000 rows.
+  // With sort or limit it locks them in sort order, then id (id alone with limit
+  // only), and takes the first limit of them; on MySQL and MariaDB on an index that
+  // reads in that order.
   lockWhere<Format extends ResourceFormat = DefaultFormat>(params: {
     transaction: ManagedTransaction | Knex.Transaction
     filters?: Record<string, unknown>
+    // Stored fields, '-' for descending.
+    sort?: string[]
+    // 1 to 1000.
+    limit?: number
     lockMode?: LockMode
     format?: Format
     queryParams?: { fields?: Record<string, string> }

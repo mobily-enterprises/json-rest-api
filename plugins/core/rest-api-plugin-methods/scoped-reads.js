@@ -188,19 +188,49 @@ export async function lockByIdsMethod (args) {
 }
 
 /**
- * Locks the visible rows the filters select until the transaction ends, in id
- * order, waiting for transactions that hold them, so a row that starts to match
- * while the lock waits is locked and returned too. At most 1,000 rows.
+ * The order of a lock read: `sort`'s stored fields ('-' for descending), each
+ * `{ field, direction }`, refused before any statement when one is no stored
+ * field that sorts.
+ * @param {unknown} sortParam
+ * @param {Record<string, any>} schema The resource's schema structure.
+ */
+function lockSort (sortParam, schema) {
+  if (!Array.isArray(sortParam)) throw invalid('sort', 'sort must be an array of fields')
+  return sortParam.map((entry, index) => {
+    const field = typeof entry === 'string' ? entry.replace(/^-/, '') : null
+    if (!field || (field !== 'id' && (!schema[field] || schema[field].virtual || schema[field].computed || schema[field].type === 'blob'))) {
+      throw invalid(`sort.${index}`, `'${entry}' is not a stored field that sorts`)
+    }
+    return { field, direction: entry.startsWith('-') ? 'desc' : 'asc' }
+  })
+}
+
+/**
+ * Locks the visible rows the filters select until the transaction ends,
+ * waiting for transactions that hold them, so a row that starts to match while
+ * the lock waits is locked and returned too. At most 1,000 rows (more throw
+ * RestApiRowLimitError), or with `limit` the first `limit` of them. With `sort`
+ * or `limit` it locks and answers the rows in `sort` order (stored fields, then
+ * id; by id with `limit` alone); without either, in id order, and on MySQL and
+ * MariaDB in the order of the index the read is forced onto (see dataLockWhere).
  * @param {any} args
  */
 export async function lockWhereMethod (args) {
   const { params, context, vars, helpers, scope, scopes, runHooks, hasHooks, hookNames, scopeName } = args
   const lockMode = await setupLockRead(args, 'lockWhere', 'dataLockWhere')
   const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
+  const { limit } = params
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LOCK_WHERE)) {
+    throw invalid('limit', `limit must be an integer from 1 to ${MAX_LOCK_WHERE}`)
+  }
+  const sort = params.sort === undefined ? undefined : lockSort(params.sort, context.schemaInfo.schemaStructure)
   assertBlobReads({ context, scopes, scopeName, rows: MAX_LOCK_WHERE + 1, operation: 'lockWhere' })
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
-  const document = await helpers.dataLockWhere({ scopeName, context, runHooks, filters, limit: MAX_LOCK_WHERE + 1, lockMode })
-  if (document.data.length > MAX_LOCK_WHERE) throw new RestApiRowLimitError({ resourceType: scopeName, rowLimit: MAX_LOCK_WHERE, operation: 'lockWhere' })
+  const order = sort ?? (limit === undefined ? undefined : [])
+  const document = await helpers.dataLockWhere({ scopeName, context, runHooks, filters, limit: limit ?? MAX_LOCK_WHERE + 1, order, lockMode })
+  if (limit === undefined && document.data.length > MAX_LOCK_WHERE) {
+    throw new RestApiRowLimitError({ resourceType: scopeName, rowLimit: MAX_LOCK_WHERE, operation: 'lockWhere' })
+  }
   return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks, hookNames })
 }
 
@@ -215,16 +245,7 @@ export async function claimMethod (args) {
   const limit = params.limit ?? 1
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CLAIM) throw invalid('limit', `limit must be an integer from 1 to ${MAX_CLAIM}`)
   const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
-  const sortParam = params.sort ?? ['id']
-  if (!Array.isArray(sortParam)) throw invalid('sort', 'sort must be an array of fields')
-  const schema = context.schemaInfo.schemaStructure
-  const sort = sortParam.map((entry, index) => {
-    const field = typeof entry === 'string' ? entry.replace(/^-/, '') : null
-    if (!field || (field !== 'id' && (!schema[field] || schema[field].virtual || schema[field].computed || schema[field].type === 'blob'))) {
-      throw invalid(`sort.${index}`, `'${entry}' is not a stored field that sorts`)
-    }
-    return { field, direction: entry.startsWith('-') ? 'desc' : 'asc' }
-  })
+  const sort = lockSort(params.sort ?? ['id'], context.schemaInfo.schemaStructure)
   assertBlobReads({ context, scopes, scopeName, rows: limit, operation: 'claim' })
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
   const document = await helpers.dataClaim({ scopeName, context, runHooks, filters, sort, limit, lockMode })

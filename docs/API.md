@@ -1356,7 +1356,7 @@ many-to-many or reverse relationships, file fields, or positions.
 ```javascript
 await api.transaction(async transaction => {
   const { data: locked } = await resource.lockByIds({ ids, transaction, missing, lockMode, format, queryParams: { fields } }, context)
-  const { data: matching } = await resource.lockWhere({ filters, transaction, lockMode, format, queryParams: { fields } }, context)
+  const { data: matching } = await resource.lockWhere({ filters, sort, limit, transaction, lockMode, format, queryParams: { fields } }, context)
   const { data: taken } = await resource.claim({ filters, sort, limit, transaction, lockMode, format, queryParams: { fields } }, context)
 })
 ```
@@ -1373,10 +1373,14 @@ MySQL and MariaDB it locks every listed id, hidden ones too, until commit, so
 pass ids from a scoped read, never a raw request list. `lockWhere` locks the
 visible rows the filters select in id order, waiting for other transactions and
 including rows that start to match meanwhile; more than 1,000 throw
-`RestApiRowLimitError`. On MySQL and MariaDB it has no `ORDER BY` and forces an
-index that starts with the whole ownership columns (or, without ownership
-conditions, a filtered column), and throws `RestApiBulkWriteUnsupportedError`
-when the table has none.
+`RestApiRowLimitError`. With `sort` (stored fields, `'-'` for descending) it
+locks and returns them in that order, then by id, and with `limit` (1 to 1,000)
+it locks only the first `limit` of them, by id without a `sort`, and throws no
+`RestApiRowLimitError`. On MySQL and MariaDB it forces an index that starts
+with the whole ownership columns (or, without ownership conditions, a filtered
+column), with no `ORDER BY` unless `sort` or `limit` asks for one, when the
+index must read the rows in that order, and throws
+`RestApiBulkWriteUnsupportedError` when the table has no such index.
 `claim` takes up to `limit` (default 1, at most 1,000) matching rows that no
 other transaction holds (`SKIP LOCKED`), in `sort` order (stored fields, default
 `['id']`). A row policy that joins tables is refused for all three. On SQLite,

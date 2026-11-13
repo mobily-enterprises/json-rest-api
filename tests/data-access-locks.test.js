@@ -1,5 +1,6 @@
 import { after, before, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import knexLib from 'knex'
 import {
   RestApiBulkWriteUnsupportedError,
   RestApiLockOutsideTransactionError,
@@ -10,7 +11,7 @@ import {
 import { storageMode } from './helpers/storage-mode.js'
 import { databaseClient } from './helpers/test-database.js'
 import { connectionId, waitForLockWait } from './helpers/lock-wait.js'
-import { holdManagedTransaction } from './helpers/transaction-completion.js'
+import { NOWAIT_MYSQL_CODE, holdManagedTransaction } from './helpers/transaction-completion.js'
 import { createDataAccessFixture, seedLedger, workspaceA, workspaceB } from './fixtures/data-access-api.js'
 
 const cause = error => error?.cause ?? error
@@ -193,6 +194,121 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
     })
   })
 
+  it('lockWhere with sort or limit locks the rows in sort order, then id, and takes the first limit of them', async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    const ids = document => document.data.map(record => String(record.id))
+    const refused = error => isA(RestApiBulkWriteUnsupportedError)(error) && /index/.test(cause(error).message + JSON.stringify(cause(error).details))
+    const locked = []
+    const record = query => { if (/for update/i.test(query.sql)) locked.push(query) }
+    await fixture.api.transaction(async transaction => {
+      const lock = params => entries.lockWhere({ filters: { status: 'open' }, transaction, ...params }, workspaceA())
+      fixture.knex.on('query', record)
+      try {
+        // 4 to 6 are hidden by the row policy, 7 to 9 belong to ws-b.
+        assert.deepEqual(ids(await lock({ sort: ['-code'] })), ['3', '2', '1'])
+      } finally { fixture.knex.removeListener('query', record) }
+      assert.deepEqual(ids(await lock({ sort: ['-code'], limit: 2 })), ['3', '2'])
+      // An equality on each column of a unique key, with limit: 1, is its one row.
+      assert.deepEqual(ids(await entries.lockWhere({ filters: { code: 'E2' }, limit: 1, transaction }, workspaceA())), ['2'])
+      for (const params of [{ limit: 0 }, { limit: 1001 }, { limit: 1.5 }, { limit: '1' }, { sort: 'code' }, { sort: ['nope'] }, { sort: ['-'] }]) {
+        await assert.rejects(lock(params), isA(RestApiValidationError), JSON.stringify(params))
+      }
+      if (!isMysql) {
+        // A limit alone takes the lowest ids, and the sort's directions may differ.
+        assert.deepEqual(ids(await lock({ limit: 2 })), ['1', '2'])
+        assert.deepEqual(ids(await lock({ sort: ['access_group', '-amount'] })), ['3', '2', '1'])
+      }
+    })
+    if (!isMysql) return
+    // InnoDB locks rows in the order it reads them, so the ordered read reads the index in that order, with no sort.
+    const [plan] = await fixture.knex.raw(`explain ${locked[0].sql.replace(/ for update$/i, '')}`, locked[0].bindings)
+    assert.match(locked[0].sql, /force index/)
+    assert.ok(plan.every(row => !/filesort/i.test(row.Extra ?? '')), JSON.stringify(plan))
+    const lock = params => fixture.api.transaction(transaction => entries.lockWhere({ filters: { status: 'open' }, transaction, ...params }, workspaceA()))
+    // After workspace_id, the unique index holds code: no order by id alone, nor mixed directions.
+    await assert.rejects(lock({ limit: 2 }), refused)
+    await assert.rejects(lock({ sort: ['code', '-amount'] }), refused)
+    // A descending key part keeps the rows in the other order.
+    await fixture.knex.raw('create index da_entries_ws_amount_desc on da_entries (workspace_id, amount desc)')
+    try {
+      await assert.rejects(lock({ sort: ['amount'] }), refused)
+    } finally { await fixture.knex.raw('drop index da_entries_ws_amount_desc on da_entries') }
+    // An index that holds both sorted columns reads them one way only, forward or backward.
+    await fixture.knex.raw('create index da_entries_ws_group_amount on da_entries (workspace_id, access_group, amount)')
+    try {
+      await assert.rejects(lock({ sort: ['access_group', '-amount'] }), refused)
+      assert.deepEqual(ids(await lock({ sort: ['-access_group', '-amount'] })), ['3', '2', '1'])
+    } finally { await fixture.knex.raw('drop index da_entries_ws_group_amount on da_entries') }
+    // An index that fixes status reads in id order after it.
+    await fixture.knex.raw('create index da_entries_ws_status on da_entries (workspace_id, status)')
+    try {
+      assert.deepEqual(ids(await lock({ limit: 2 })), ['1', '2'])
+    } finally { await fixture.knex.raw('drop index da_entries_ws_status on da_entries') }
+  })
+
+  it('lockWhere with sort takes its locks in sort order', { skip: !serverDatabase && 'SQLite has one writer' }, async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    const lockBusy = error => error?.code === '55P03' || NOWAIT_MYSQL_CODE.test(error?.code ?? '')
+    const free = id => fixture.knex.transaction(probe => probe('da_entries').where({ id }).forUpdate().noWait())
+      .then(() => 'free', error => { if (lockBusy(error)) return 'held'; throw error })
+    // While another transaction holds E1, a lockWhere waits for it at the first
+    // row it locks in its order: in descending code order it holds E3 and E2 by then.
+    const heldWhileWaiting = async sort => {
+      let reportWaiter
+      const waiterId = new Promise(resolve => { reportWaiter = resolve })
+      let second
+      let held
+      await fixture.api.transaction(async first => {
+        await entries.lockByIds({ ids: ['1'], transaction: first }, workspaceA())
+        second = fixture.api.transaction(async transaction => {
+          reportWaiter(await connectionId(transaction))
+          return entries.lockWhere({ filters: { status: 'open' }, transaction, ...(sort ? { sort } : {}) }, workspaceA())
+        })
+        await waitForLockWait(fixture.knex, await waiterId, second)
+        held = [await free(3), await free(2)]
+      })
+      return { held, locked: (await second).data.map(record => String(record.id)) }
+    }
+    assert.deepEqual(await heldWhileWaiting(['-code']), { held: ['held', 'held'], locked: ['3', '2', '1'] })
+    assert.deepEqual(await heldWhileWaiting(), { held: ['free', 'free'], locked: ['1', '2', '3'] })
+  })
+
+  it('lockWhere of one row with limit: 1 sends one statement, as lockByIds does, at any table size', async () => {
+    const fields = { da_entries: 'code,amount' }
+    const sizes = []
+    for (const entriesPerAccount of [3, 300]) {
+      await seedLedger(fixture, { entriesPerAccount })
+      const entries = fixture.api.resources.da_entries
+      const locks = {
+        lockByIds: transaction => entries.lockByIds({ ids: ['2'], transaction, queryParams: { fields } }, workspaceA()),
+        'lockWhere limit 1': transaction => entries.lockWhere({ filters: { code: 'E2' }, limit: 1, transaction, queryParams: { fields } }, workspaceA()),
+        lockWhere: transaction => entries.lockWhere({ filters: { code: 'E2' }, transaction, queryParams: { fields } }, workspaceA())
+      }
+      const counts = {}
+      for (const [name, lock] of Object.entries(locks)) {
+        // The process reads a MySQL table's indexes once per set of columns: not this measure.
+        await fixture.api.transaction(lock)
+        counts[name] = await fixture.api.transaction(async transaction => {
+          let sent = 0
+          const count = query => { if (!/^\s*(begin|commit|rollback|savepoint|release|start transaction)\b/i.test(query.sql)) sent++ }
+          fixture.knex.on('query', count)
+          try {
+            assert.equal((await lock(transaction)).data.length, 1)
+          } finally { fixture.knex.removeListener('query', count) }
+          return sent
+        })
+      }
+      sizes.push(counts)
+    }
+    // SQLite's first lock in a transaction takes the write lock first. Without
+    // a limit PostgreSQL reads again, for rows that start to match while it waits.
+    const one = serverDatabase ? 1 : 2
+    const expected = { lockByIds: one, 'lockWhere limit 1': one, lockWhere: databaseClient === 'pg' ? 2 : one }
+    assert.deepEqual(sizes, [expected, expected])
+  })
+
   it('lockByIds sorts a list longer than one statement before it chunks it', async () => {
     await seedLedger(fixture)
     // Listed backwards: each statement must still take a contiguous run, lowest first.
@@ -254,24 +370,38 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
     assert.ok(lockSql[1].includes(`from \`da_entries\` force index (\`${entriesIndex}\`)`), lockSql[1])
   })
 
-  it('lockWhere on MySQL checks the index of the schema the connection uses', { skip: databaseClient !== 'mysql2' && 'MySQL and MariaDB only' }, async () => {
+  it('lockWhere on MySQL reads the schema once for a client whose settings name a database, and at every call otherwise', { skip: databaseClient !== 'mysql2' && 'MySQL and MariaDB only' }, async () => {
     await seedLedger(fixture)
     const refused = error => isA(RestApiBulkWriteUnsupportedError)(error) && /index/.test(cause(error).message + JSON.stringify(cause(error).details))
+    const entries = fixture.api.resources.da_entries
+    const lock = transaction => entries.lockWhere({ filters: { status: 'open' }, transaction }, workspaceA())
+    // The fixture's client names its database, which each connection of its pool uses.
+    const schemaReads = []
+    const record = query => { if (/select database\(\)/i.test(query.sql)) schemaReads.push(query.sql) }
+    fixture.knex.on('query', record)
+    try {
+      await fixture.api.transaction(lock)
+      await fixture.api.transaction(lock)
+    } finally { fixture.knex.removeListener('query', record) }
+    assert.ok(schemaReads.length <= 1, schemaReads.join(' | '))
+    // A client that names none reads it at each call, so after a USE the call checks that schema's indexes.
     const [[{ name: current }]] = await fixture.knex.raw('select database() as name')
     const other = `${current}_other`
+    const unnamed = knexLib({ client: 'mysql2', connection: { ...fixture.knex.client.config.connection, database: undefined }, pool: { min: 0, max: 1 } })
     await fixture.knex.raw('create database ??', [other])
     try {
       // The other schema's da_entries has no index that starts with workspace_id.
       await fixture.knex.raw('create table ??.da_entries (id int primary key)', [other])
-      const entries = fixture.api.resources.da_entries
-      await fixture.api.transaction(async transaction => {
-        await entries.lockWhere({ filters: { status: 'open' }, transaction }, workspaceA())
+      await unnamed.transaction(async transaction => {
+        await transaction.raw('use ??', [current])
+        await lock(transaction)
         await transaction.raw('use ??', [other])
-        try {
-          await assert.rejects(entries.lockWhere({ filters: { status: 'open' }, transaction }, workspaceA()), refused)
-        } finally { await transaction.raw('use ??', [current]) }
+        await assert.rejects(lock(transaction), refused)
       })
-    } finally { await fixture.knex.raw('drop database ??', [other]) }
+    } finally {
+      await unnamed.destroy()
+      await fixture.knex.raw('drop database ??', [other])
+    }
   })
 
   it('lockWhere locks a row that starts to match while it waits', { skip: !serverDatabase && 'SQLite has one writer' }, async () => {

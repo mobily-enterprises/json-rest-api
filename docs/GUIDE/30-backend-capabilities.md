@@ -103,7 +103,7 @@ storage slots.
 | Ids of inserted rows | `RETURNING` | `RETURNING` on MariaDB 10.5+; on MySQL the first `insertId` and `auto_increment_increment`, read back and verified (`RestApiBulkInsertIdsError` on a mismatch) | `RETURNING` |
 | Upsert | `ON CONFLICT` | `ON DUPLICATE KEY UPDATE`; a conflict on another unique index fails the batch | `ON CONFLICT` |
 | `lockByIds` | `FOR UPDATE` | `FOR UPDATE` | write lock, then a scoped read |
-| `lockWhere` | `FOR UPDATE`, read again until no new row appears | `FOR UPDATE` | write lock, then a scoped read |
+| `lockWhere` | `FOR UPDATE`, read again until no new row appears (or `limit` rows are held) | `FOR UPDATE`; with `sort` or `limit`, on an index that reads in that order | write lock, then a scoped read |
 | `claim` | `FOR UPDATE SKIP LOCKED` | candidates first, then `SKIP LOCKED` windows by primary key (MySQL 8.0.1+, MariaDB 10.6+) | write lock, then a scoped read |
 | Date buckets | named zones and offsets; dateTime columns must be `timestamptz`, as `createKnexTable` creates them | offsets; named zones need loaded time zone tables | offsets only; dates stored as epoch milliseconds or ISO text |
 

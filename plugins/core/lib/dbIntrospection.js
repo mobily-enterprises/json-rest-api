@@ -1309,26 +1309,42 @@ export async function listKnexTableIndexes (knex, tableName) {
   return new Map(rows.map(row => [row.name, { valid: row.valid !== false, building: row.building === true }]))
 }
 
+// The schema a Knex client's connections use, by the client's connection
+// settings: the client and every transaction it opens share that object, each
+// connection its pool opens connects to the database it names, and a new
+// client (a test's own database) or a connection provider's refresh brings a
+// new object, which reads the schema again.
+const mysqlSchemas = new WeakMap()
+
 /**
  * The schema a MySQL or MariaDB connection is using, from `database()`, a
- * statement that reads no table.
+ * statement that reads no table. A client whose connection settings name a
+ * database reads it once and keeps it: its pooled connections stay on that
+ * database (a `USE` on one is not supported). Without one it reads every time.
  * @param {any} knex
  * @returns {Promise<string>}
  */
 export async function currentKnexMysqlSchema (knex) {
-  return normalizeRows(await knex.raw('select database() as name'))[0]?.name
+  const settings = knex?.client?.connectionSettings
+  const kept = typeof settings?.database === 'string' && settings.database !== ''
+  if (kept && mysqlSchemas.has(settings)) return mysqlSchemas.get(settings)
+  const name = normalizeRows(await knex.raw('select database() as name'))[0]?.name
+  if (kept && name) mysqlSchemas.set(settings, name)
+  return name
 }
 
 /**
  * The indexes of a MySQL or MariaDB table that the optimizer may use, unique
- * or not, the primary key included: each with its columns in key order and
- * the length of a column prefix (`prefix`, null for the whole column). A
- * column list ends before its first functional key part, which names no
- * column. Invisible (MySQL) and ignored (MariaDB) indexes are left out.
+ * or not, the primary key included: each with its columns in key order, the
+ * length of a column prefix (`prefix`, null for the whole column), and whether
+ * the index keeps the column in ascending order (`ascending`: not a descending
+ * key part, nor an index that keeps no order, such as FULLTEXT). A column list
+ * ends before its first functional key part, which names no column. Invisible
+ * (MySQL) and ignored (MariaDB) indexes are left out.
  * @param {any} knex
  * @param {string} schema
  * @param {string} tableName
- * @returns {Promise<Array<{ name: string, columns: Array<{ name: string, prefix: number | null }> }>>}
+ * @returns {Promise<Array<{ name: string, columns: Array<{ name: string, prefix: number | null, ascending: boolean }> }>>}
  */
 export async function listKnexMysqlIndexes (knex, schema, tableName) {
   const rows = normalizeRows(await knex.raw(`
@@ -1340,7 +1356,9 @@ export async function listKnexMysqlIndexes (knex, schema, tableName) {
     const row = Object.fromEntries(Object.entries(raw).map(([key, value]) => [key.toLowerCase(), value]))
     if (row.is_visible === 'NO' || row.ignored === 'YES') continue
     if (!byIndex.has(row.index_name)) byIndex.set(row.index_name, [])
-    byIndex.get(row.index_name).push(row.column_name == null ? null : { name: row.column_name, prefix: row.sub_part == null ? null : Number(row.sub_part) })
+    byIndex.get(row.index_name).push(row.column_name == null
+      ? null
+      : { name: row.column_name, prefix: row.sub_part == null ? null : Number(row.sub_part), ascending: row.collation === 'A' })
   }
   return [...byIndex].map(([name, columns]) => ({ name, columns: columns.includes(null) ? columns.slice(0, columns.indexOf(null)) : columns }))
 }

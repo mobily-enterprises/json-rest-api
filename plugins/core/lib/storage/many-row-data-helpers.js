@@ -11,6 +11,7 @@ import { applyFieldSelectionToQuery, buildFieldSelection } from '../querying-wri
 import { applyInsertReturning, databaseFamily } from '../querying-writing/database-capabilities.js'
 import { blobRowsPerStatement } from '../querying-writing/blob-fields.js'
 import { loadRelationshipIdentifiers } from '../querying/relationship-identifiers.js'
+import { resolveSearchOperator } from '../querying/knex-query-helpers.js'
 import { buildJsonApiResponse } from '../querying/knex-json-api-transformers-querying.js'
 import { deletePivotReferences } from '../writing/many-to-many-manipulations.js'
 
@@ -650,8 +651,31 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     return readRecords({ scopeName, context, query: lockRows(query, context.db, { lockMode }), tableName })
   }
 
-  // The index lockWhere forces on MySQL, by schema, table and the read's columns (see lockIndexFor).
+  // The index lockWhere forces on MySQL and the ORDER BY that reads it, by schema, table, the read's columns and its
+  // order (see lockIndexFor).
   const lockIndexes = new Map()
+
+  /**
+   * The columns a lockWhere read orders by: `order`'s columns, less those the
+   * read fixes to one value (they leave the order as it is), up to the first id
+   * or with id added last, so the order is total. Each `{ column, direction }`;
+   * an added id takes the direction of the order's last field.
+   * @param {Array<{ field: string, direction: 'asc' | 'desc' }>} order
+   * @param {any} storageAdapter
+   * @param {Set<string>} [fixed] Columns the read compares with one value.
+   */
+  const lockOrderColumns = (order, storageAdapter, fixed = new Set()) => {
+    const idColumn = storageAdapter.getIdColumn()
+    const columns = []
+    for (const { field, direction } of order) {
+      const column = field === 'id' ? idColumn : storageAdapter.translateColumn(field)
+      if (fixed.has(column) || columns.some(entry => entry.column === column)) continue
+      columns.push({ column, direction })
+      if (column === idColumn) return columns
+    }
+    return [...columns, { column: idColumn, direction: order.at(-1)?.direction ?? 'asc' }]
+  }
+
   /**
    * InnoDB locks every row a locking read examines, and holds those locks until
    * commit. lockWhere on MySQL therefore forces an index that keeps its read
@@ -660,58 +684,94 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
    * conditions, one that starts with a column the filters compare. Otherwise
    * the read could walk the primary key, locking other owners' rows and the
    * gaps between them. Invisible and ignored indexes cannot be forced.
-   * Returns the index name.
-   * @param {{ scopeName: string, context: any, storageAdapter: any, tableName: string, filters?: Record<string, unknown> }} request
-   * @returns {Promise<string>}
+   * InnoDB also locks rows in the order it reads them, and a sort it cannot
+   * read from the index would lock every match first. So a read with an
+   * `order` (a sort or a limit) takes an index that reads in that order: after
+   * the columns the read fixes to one value (the ownership columns and the
+   * filters' single-value equalities), its columns are the order's, in one
+   * direction, the id last or left to the primary key InnoDB ends every
+   * secondary index with.
+   * Returns the index's name and, for an `order`, the ORDER BY that reads it
+   * in that order.
+   * @param {{ scopeName: string, context: any, storageAdapter: any, tableName: string, filters?: Record<string, unknown>, order?: Array<{ field: string, direction: 'asc' | 'desc' }> }} request
+   * @returns {Promise<{ name: string, orderBy: Array<{ column: string, direction: 'asc' | 'desc' }> | null }>}
    */
-  const lockIndexFor = async ({ scopeName, context, storageAdapter, tableName, filters = {} }) => {
+  const lockIndexFor = async ({ scopeName, context, storageAdapter, tableName, filters = {}, order }) => {
     const owned = Object.entries(context[writeConditions]?.[scopeName] || {})
       .filter(([, value]) => value !== null && value !== ANY_OWNER)
       .map(([field]) => storageAdapter.translateColumn(field))
     const search = context.schemaInfo.searchSchemaStructure || {}
-    const compared = Object.keys(filters).flatMap(key => {
-      const definition = search[key]
-      if (!definition || definition.oneOf || definition.applyFilter || definition.polymorphicField || definition.actualField?.includes('.')) return []
-      return [storageAdapter.translateColumn(definition.actualField || key)]
-    })
+    const simple = definition => definition && !definition.oneOf && !definition.applyFilter && !definition.polymorphicField && !definition.actualField?.includes('.')
+    const columnOf = key => storageAdapter.translateColumn(search[key].actualField || key)
+    const compared = Object.keys(filters).filter(key => simple(search[key])).map(columnOf)
+    const fixed = new Set([...owned, ...Object.entries(filters)
+      .filter(([key, value]) => simple(search[key]) && ['=', '=='].includes(resolveSearchOperator(search[key])) && value !== null && value !== undefined && !Array.isArray(value))
+      .map(([key]) => columnOf(key))])
+    const ordered = order ? lockOrderColumns(order, storageAdapter, fixed) : null
     // One pool can serve several databases, so the cache is per schema.
     const schema = await currentKnexMysqlSchema(context.db)
-    const cacheKey = JSON.stringify([schema, tableName, [...owned].sort(), [...compared].sort()])
+    const cacheKey = JSON.stringify([schema, tableName, [...owned].sort(), [...compared].sort(), ordered && [[...fixed].sort(), ordered]])
     if (lockIndexes.has(cacheKey)) return lockIndexes.get(cacheKey)
     const indexes = await listKnexMysqlIndexes(context.db, schema, tableName)
     const leading = owned.length
       ? indexes.filter(({ columns }) => columns.length >= owned.length &&
         columns.slice(0, owned.length).every(column => owned.includes(column.name) && column.prefix === null))
       : indexes.filter(({ columns }) => compared.includes(columns[0]?.name))
-    // Among those, one whose next column the filters compare locks fewer rows.
-    const index = leading.find(({ columns }) => compared.includes(columns[owned.length]?.name)) ?? leading[0]
+    // Among those that read in order, the one that fixes most columns examines the fewest rows.
+    const inOrder = ordered && leading.map(candidate => ({ candidate, fixes: fixedColumnsInOrder(candidate.columns, fixed, ordered) }))
+      .filter(({ fixes }) => fixes >= 0).sort((left, right) => right.fixes - left.fixes)[0]
+    const index = ordered
+      ? inOrder?.candidate
+      // Among those, one whose next column the filters compare locks fewer rows.
+      : leading.find(({ columns }) => compared.includes(columns[owned.length]?.name)) ?? leading[0]
     if (!index) {
+      const start = owned.length ? `the whole ownership column(s) ${owned.join(', ')}` : 'a column the filters compare'
+      const sorted = ordered?.slice(0, -1).map(({ column }) => column) ?? []
+      const then = !ordered
+        ? ''
+        : `, and after the columns the read fixes to one value holds ${sorted.length ? `${sorted.join(', ')} (all ascending or all descending)` : 'no other column'}, so it reads the rows in the order lockWhere's sort or limit locks them`
       throw new RestApiBulkWriteUnsupportedError({
         resourceType: scopeName,
         operation: 'lockWhere',
-        reason: `on MySQL and MariaDB a locking read locks every row it examines; add a visible index of '${tableName}' that starts with ${owned.length ? `the whole ownership column(s) ${owned.join(', ')}` : 'a column the filters compare'}`
+        reason: `on MySQL and MariaDB a locking read locks every row it examines, in the order it reads them; add a visible index of '${tableName}' that starts with ${start}${then}`
       })
     }
-    lockIndexes.set(cacheKey, index.name)
-    return index.name
+    // The ORDER BY names the index's own columns after the fixed ones, whose
+    // order the rows come in, and the id only where the index holds no other:
+    // ties then come in the primary key's order InnoDB ends the index with.
+    // MariaDB reads a unique index's implied primary key as no order and would
+    // sort the rows, after locking every one, for an ORDER BY that names it.
+    const rest = inOrder && index.columns.slice(inOrder.fixes)
+    const choice = {
+      name: index.name,
+      orderBy: !rest ? null : rest.length ? rest.map(({ name }, position) => ({ column: name, direction: ordered[position].direction })) : [ordered.at(-1)]
+    }
+    lockIndexes.set(cacheKey, choice)
+    return choice
   }
 
   /**
    * Lock up to `limit` visible rows the filters select, waiting for
-   * transactions that hold them, in one locking read like dataLockByIds: in id
+   * transactions that hold them, in one locking read like dataLockByIds. With
+   * `order` (a lock read's sort; empty for id alone) the rows are locked and
+   * read in that order, then by id, with ORDER BY; on MySQL on an index that
+   * reads in that order, by the ORDER BY lockIndexFor gives. Without it, in id
    * order, except on MySQL, where the read is forced onto the index that
    * lockIndexFor picks and the rows come in its order, as ORDER BY id could
    * walk the primary key.
-   * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, limit: number, lockMode?: 'update' | 'noKeyUpdate' | 'share' }} request
+   * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, limit: number, order?: Array<{ field: string, direction: 'asc' | 'desc' }>, lockMode?: 'update' | 'noKeyUpdate' | 'share' }} request
    */
-  const dataLockWhere = async ({ scopeName, context, runHooks, filters, limit, lockMode }) => {
+  const dataLockWhere = async ({ scopeName, context, runHooks, filters, limit, order, lockMode }) => {
     const read = async () => {
-      const { query, storageAdapter, tableName, idColumn } = await lockingQuery({ scopeName, context, runHooks, operation: 'lockWhere', purpose: 'lock', filters })
+      const { query, storageAdapter, tableName } = await lockingQuery({ scopeName, context, runHooks, operation: 'lockWhere', purpose: 'lock', filters })
+      let orderBy = order ? lockOrderColumns(order, storageAdapter) : [{ column: storageAdapter.getIdColumn(), direction: 'asc' }]
       if (databaseFamily(context.db) === 'mysql') {
         // Without FORCE INDEX the optimizer could still pick another index or a full scan.
-        const index = await lockIndexFor({ scopeName, context, storageAdapter, tableName, filters })
-        query.from(context.db.raw('?? force index (??)', [tableName, index]))
-      } else query.orderBy(idColumn)
+        const index = await lockIndexFor({ scopeName, context, storageAdapter, tableName, filters, order })
+        query.from(context.db.raw('?? force index (??)', [tableName, index.name]))
+        orderBy = index.orderBy ?? []
+      }
+      for (const { column, direction } of orderBy) query.orderBy(`${tableName}.${column}`, direction)
       return readRecords({ scopeName, context, query: lockRows(query.limit(limit), context.db, { lockMode }), tableName })
     }
     let document = await read()
@@ -772,6 +832,22 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
   }
 
   return { dataScopedQuery, dataVisibleIds, dataIdsByKeys, dataInsertMany, dataUpdateByIds, dataDeleteByIds, dataLockByIds, dataLockWhere, dataClaim }
+}
+
+// How many leading columns of a MySQL index a lockWhere fixes to one value,
+// when the index reads its rows in `ordered`'s order; -1 when it does not.
+// After those columns it holds the order's, the id last or left to the primary
+// key InnoDB ends every secondary index with, all in one direction (InnoDB
+// reads an index forward or backward). A column prefix, a descending key part
+// and an index that keeps no order (FULLTEXT) order nothing here.
+function fixedColumnsInOrder (columns, fixed, ordered) {
+  if (ordered.some(({ direction }) => direction !== ordered[0].direction)) return -1
+  let start = 0
+  while (start < columns.length && columns[start].prefix === null && fixed.has(columns[start].name)) start++
+  const rest = columns.slice(start)
+  const wanted = ordered.map(({ column }) => column)
+  const reads = list => rest.length === list.length && rest.every((column, index) => column.prefix === null && column.ascending && column.name === list[index])
+  return reads(wanted) || reads(wanted.slice(0, -1)) ? start : -1
 }
 
 const sameValue = (left, right) => {
