@@ -444,6 +444,20 @@ of its own, or leave the database out of the client's settings. A test or
 budget that counts a read's statements counts one fewer for each linked type
 that now needs no read.
 
+## Current selections and lock pages (3.1.9)
+
+| 3.1.8 | 3.1.9 |
+| --- | --- |
+| on MySQL and MariaDB `patchWhere` and `deleteWhere` read their selection plainly, from the transaction's snapshot: inside a transaction that had already read plainly, they left out rows committed since | the selection is a locking read in the write's lock mode, which reads the latest committed rows, as `UPDATE … WHERE` does; the same statements |
+| `lockWhere` locked at most 1,000 rows | `after` (an id) pages it in id order: only the rows after that id |
+
+Upgrading: on MySQL and MariaDB a selection write now locks the rows its
+selection examines from that read on, where it locked the rows it selected a
+statement later, so give its filters an index. With MariaDB's
+`innodb_snapshot_isolation` on, a selection that meets a row changed since the
+snapshot fails with errno 1020; retry the transaction. PostgreSQL and SQLite
+are unchanged.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

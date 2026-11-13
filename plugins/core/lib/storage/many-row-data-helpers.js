@@ -232,11 +232,16 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
 
   /**
    * Identifiers the caller may touch, in id order: those of `ids` that are
-   * visible, or one keyset page of the rows `filters` select.
-   * @param {{ scopeName: string, context: any, runHooks: Function, ids?: unknown[], filters?: Record<string, unknown>, queryPurpose: string, after?: unknown, limit?: number }} request
+   * visible, or one keyset page of the rows `filters` select. With `lockMode`
+   * (a selection write's), MySQL and MariaDB read the page with that row lock:
+   * a plain read there comes from the transaction's snapshot, fixed at its
+   * first plain read, so it would miss rows committed since, as UPDATE …
+   * WHERE never does. A PostgreSQL statement reads what was committed when it
+   * began, and SQLite has one writer.
+   * @param {{ scopeName: string, context: any, runHooks: Function, ids?: unknown[], filters?: Record<string, unknown>, queryPurpose: string, after?: unknown, limit?: number, lockMode?: 'update' | 'noKeyUpdate' }} request
    * @returns {Promise<Array<string | number>>}
    */
-  const dataVisibleIds = async ({ scopeName, context, runHooks, ids, filters, queryPurpose, after, limit }) => {
+  const dataVisibleIds = async ({ scopeName, context, runHooks, ids, filters, queryPurpose, after, limit, lockMode }) => {
     const storageAdapter = adapterFor(scopeName)
     const db = context.db || api.knex.instance
     const tableName = storageAdapter.getTableName()
@@ -249,6 +254,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     // Policy joins can repeat a row; the identity projection keeps big integers exact.
     query.distinct({ id: databaseIdentityExpression(db, idColumn) }).orderBy(idColumn)
     if (limit) query.limit(limit)
+    if (lockMode && databaseFamily(db) === 'mysql') lockRows(query, db, { lockMode })
     const rows = await applyDatabaseReadOptions(query)
     return rows.map(row => row.id)
   }
@@ -758,12 +764,14 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
    * reads in that order, by the ORDER BY lockIndexFor gives. Without it, in id
    * order, except on MySQL, where the read is forced onto the index that
    * lockIndexFor picks and the rows come in its order, as ORDER BY id could
-   * walk the primary key.
-   * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, limit: number, order?: Array<{ field: string, direction: 'asc' | 'desc' }>, lockMode?: 'update' | 'noKeyUpdate' | 'share' }} request
+   * walk the primary key. `after` (with an empty `order`) keeps the rows after
+   * that id, a range the index's id suffix reads.
+   * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, limit: number, order?: Array<{ field: string, direction: 'asc' | 'desc' }>, after?: string | number, lockMode?: 'update' | 'noKeyUpdate' | 'share' }} request
    */
-  const dataLockWhere = async ({ scopeName, context, runHooks, filters, limit, order, lockMode }) => {
+  const dataLockWhere = async ({ scopeName, context, runHooks, filters, limit, order, after, lockMode }) => {
     const read = async () => {
-      const { query, storageAdapter, tableName } = await lockingQuery({ scopeName, context, runHooks, operation: 'lockWhere', purpose: 'lock', filters })
+      const { query, storageAdapter, tableName, idColumn } = await lockingQuery({ scopeName, context, runHooks, operation: 'lockWhere', purpose: 'lock', filters })
+      if (after !== undefined) query.where(idColumn, '>', storageAdapter.translateFilterValue('id', after))
       let orderBy = order ? lockOrderColumns(order, storageAdapter) : [{ column: storageAdapter.getIdColumn(), direction: 'asc' }]
       if (databaseFamily(context.db) === 'mysql') {
         // Without FORCE INDEX the optimizer could still pick another index or a full scan.

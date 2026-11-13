@@ -270,15 +270,17 @@ function requireIds (ids, { scopeOptions, vars, scopeName }) {
 }
 
 /**
- * Reads every visible identifier the filters select, in keyset pages.
+ * Reads every visible identifier the filters select, in keyset pages, with
+ * the row lock the write takes (on MySQL and MariaDB; see dataVisibleIds).
  * @param {any} args
  * @param {Record<string, unknown> | undefined} filters
+ * @param {'update' | 'noKeyUpdate'} lockMode
  */
-export async function visibleIdsByFilters ({ helpers, context, runHooks, scopeName }, filters) {
+export async function visibleIdsByFilters ({ helpers, context, runHooks, scopeName }, filters, lockMode) {
   const ids = []
   let after
   for (;;) {
-    const page = await helpers.dataVisibleIds({ scopeName, context, runHooks, filters, queryPurpose: 'bulk-write', after, limit: VISIBLE_PAGE_SIZE })
+    const page = await helpers.dataVisibleIds({ scopeName, context, runHooks, filters, queryPurpose: 'bulk-write', after, limit: VISIBLE_PAGE_SIZE, lockMode })
     ids.push(...page)
     if (page.length < VISIBLE_PAGE_SIZE) return ids
     after = page[page.length - 1]
@@ -331,7 +333,7 @@ export async function patchWhereMethod (args) {
     // The visible ids are read in the write's transaction, so open it first.
     await beginWriteTransaction(context, params.transaction, helpers.newTransaction, args.runHooks)
     context.db = context.transaction
-    const ids = await visibleIdsByFilters(args, filters)
+    const ids = await visibleIdsByFilters(args, filters, lockMode)
     if (!ids.length) {
       await commitOwnedTransaction(context)
       return context.returning === 'count' ? { meta: { count: 0 } } : context.returning === 'none' ? undefined : { data: [] }

@@ -201,6 +201,17 @@ longer matches in the meantime is left out. The result lists the rows actually
 written, and the methods never throw `RestApiRecordsNotFoundError`; they take no
 `missing` option.
 
+On MySQL and MariaDB the selection itself is a locking read, in the write's
+lock mode, as `UPDATE … WHERE` is there: a plain read would come from the
+transaction's snapshot, which REPEATABLE READ fixes at the transaction's first
+plain read, so inside a transaction that had already read it would miss rows
+committed since. Like `UPDATE … WHERE`, it locks the rows it examines until
+commit, so give the filters an index. PostgreSQL reads the selection plainly:
+each statement reads what was committed when it began. With MariaDB's
+`innodb_snapshot_isolation` on, a selection that meets a row changed since the
+snapshot fails ("Record has changed since last read", errno 1020) instead;
+retry the transaction.
+
 The filters are checked on each row as it is once locked, so a selection write
 is a compare-and-set on them: of two transactions whose filters matched the
 same row, the one that waits for the other's lock finds the row the other

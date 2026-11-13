@@ -133,7 +133,7 @@ export interface DataAccessMethods<
   // waiting for other transactions; throws RestApiRowLimitError past 1000 rows.
   // With sort or limit it locks them in sort order, then id (id alone with limit
   // only), and takes the first limit of them; on MySQL and MariaDB on an index that
-  // reads in that order.
+  // reads in that order. after pages in id order: only the rows after that id.
   lockWhere<Format extends ResourceFormat = DefaultFormat>(params: {
     transaction: ManagedTransaction | Knex.Transaction
     filters?: Record<string, unknown>
@@ -141,6 +141,8 @@ export interface DataAccessMethods<
     sort?: string[]
     // 1 to 1000.
     limit?: number
+    // The id of the last row the previous page locked; takes no sort.
+    after?: DirectResourceId
     lockMode?: LockMode
     format?: Format
     queryParams?: { fields?: Record<string, string> }

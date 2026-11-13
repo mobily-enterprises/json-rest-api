@@ -144,21 +144,29 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
     return second
   }
   const newEntry = (id, attributes = {}) => ({ id, code: `W${id}`, amount: 1, status: 'open', workspace_id: 'ws-a', access_group: 'g1', account_id: 1, ...attributes })
+  // The innodb_snapshot_isolation a case sets, which only MariaDB has. MySQL reads as MariaDB does with it OFF, so
+  // its OFF case runs without setting it and its ON case is skipped (null).
+  const snapshotSetting = async (t, snapshotIsolation) => {
+    if (!snapshotIsolation) return undefined
+    try {
+      await fixture.knex.raw('SELECT @@innodb_snapshot_isolation')
+      return snapshotIsolation
+    } catch {
+      if (snapshotIsolation === 'OFF') return undefined
+      t.skip('the server has no innodb_snapshot_isolation')
+      return null
+    }
+  }
 
   for (const snapshotIsolation of isMysql ? ['OFF', 'ON'] : [undefined]) {
     const name = snapshotIsolation ? ` (innodb_snapshot_isolation ${snapshotIsolation})` : ''
     it(`lockByIds sees what the lock holder committed while it waited${name}`, { skip: !serverDatabase && 'SQLite has one writer' }, async t => {
-      if (snapshotIsolation) {
-        try {
-          await fixture.knex.raw('SELECT @@innodb_snapshot_isolation')
-        } catch {
-          return t.skip('the server has no innodb_snapshot_isolation')
-        }
-      }
+      const setting = await snapshotSetting(t, snapshotIsolation)
+      if (setting === null) return
       await seedLedger(fixture)
       const accounts = fixture.api.resources.da_accounts
       const { account, entry } = await whileWaiting({
-        snapshotIsolation,
+        snapshotIsolation: setting,
         hold: first => accounts.lockByIds({ ids: ['1'], transaction: first }, workspaceA()),
         write: async first => {
           await first('da_entries').insert(newEntry(100))
@@ -309,6 +317,66 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
     assert.deepEqual(sizes, [expected, expected])
   })
 
+  // On MySQL and MariaDB an id order needs an index that reads in it after the fixed columns.
+  const withStatusIndex = async work => {
+    if (isMysql) await fixture.knex.raw('create index da_entries_ws_status on da_entries (workspace_id, status)')
+    try { return await work() } finally {
+      if (isMysql) await fixture.knex.raw('drop index da_entries_ws_status on da_entries')
+    }
+  }
+  const lockPages = async (transaction, limit) => {
+    const pages = []
+    for (let after; ;) {
+      const page = await fixture.api.resources.da_entries.lockWhere({ filters: { status: 'open' }, limit, ...(after === undefined ? {} : { after }), transaction }, workspaceA())
+      pages.push(page.data.map(record => String(record.id)))
+      if (page.data.length < limit) return pages
+      if (pages.length > 10) throw new Error(`lockWhere did not page: ${JSON.stringify(pages.slice(0, 3))}`)
+      after = pages.at(-1).at(-1)
+    }
+  }
+
+  it('lockWhere pages with after in id order, the same statements a page at any size', async () => {
+    const sizes = await withStatusIndex(async () => {
+      const counts = []
+      for (const [entriesPerAccount, limit] of [[25, 10], [250, 100]]) {
+        await seedLedger(fixture, { entriesPerAccount })
+        // The process reads a MySQL table's indexes once per set of columns: not this measure.
+        await fixture.api.transaction(transaction => lockPages(transaction, limit))
+        const { result: pages, statements } = await fixture.measure(() => fixture.api.transaction(transaction => lockPages(transaction, limit)))
+        // ws-a's visible rows are 1 to entriesPerAccount: the next ids are hidden by the row policy.
+        assert.deepEqual(pages.flat(), Array.from({ length: entriesPerAccount }, (_, index) => String(index + 1)))
+        counts.push({ pages: pages.map(page => page.length), statements })
+      }
+      return counts
+    })
+    assert.deepEqual(sizes.map(size => size.pages), [[10, 10, 5], [100, 100, 50]])
+    assert.equal(sizes[1].statements, sizes[0].statements)
+    await seedLedger(fixture)
+    await fixture.api.transaction(async transaction => {
+      const lock = params => fixture.api.resources.da_entries.lockWhere({ filters: { status: 'open' }, transaction, ...params }, workspaceA())
+      for (const params of [{ after: '1', sort: ['code'] }, { after: '' }, { after: null }, { after: {} }]) {
+        await assert.rejects(lock(params), isA(RestApiValidationError), JSON.stringify(params))
+      }
+    })
+    if (!isMysql) return
+    // Pages follow the id, which the unique (workspace_id, code) index does not read in after an amount, with or
+    // without a limit.
+    for (const limit of [2, undefined]) {
+      await assert.rejects(fixture.api.transaction(transaction => fixture.api.resources.da_entries.lockWhere({ filters: { amount: 10 }, limit, after: '1', transaction }, workspaceA())), isA(RestApiBulkWriteUnsupportedError), String(limit))
+    }
+  })
+
+  it('lockWhere with after locks the rows committed since the transaction first read', { skip: !serverDatabase && 'needs a second connection' }, async () => {
+    await seedLedger(fixture)
+    const pages = await withStatusIndex(() => fixture.api.transaction(async transaction => {
+      // A plain read first: on MySQL and MariaDB it fixes the transaction's snapshot.
+      await fixture.api.resources.da_entries.get({ id: '1', transaction }, workspaceA())
+      await fixture.knex('da_entries').insert(newEntry('50'))
+      return lockPages(transaction, 2)
+    }))
+    assert.deepEqual(pages, [['1', '2'], ['3', '50'], []])
+  })
+
   it('lockByIds sorts a list longer than one statement before it chunks it', async () => {
     await seedLedger(fixture)
     // Listed backwards: each statement must still take a contiguous run, lowest first.
@@ -423,13 +491,8 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
   for (const snapshotIsolation of isMysql ? ['OFF', 'ON'] : [undefined]) {
     const name = snapshotIsolation ? ` (innodb_snapshot_isolation ${snapshotIsolation})` : ''
     it(`patchWhere and deleteWhere re-check their filters on the row a concurrent writer committed${name}`, { skip: !serverDatabase && 'SQLite has one writer' }, async t => {
-      if (snapshotIsolation) {
-        try {
-          await fixture.knex.raw('SELECT @@innodb_snapshot_isolation')
-        } catch {
-          return t.skip('the server has no innodb_snapshot_isolation')
-        }
-      }
+      const setting = await snapshotSetting(t, snapshotIsolation)
+      if (setting === null) return
       const entries = fixture.api.resources.da_entries
       const open = { filters: { code: 'E1', status: 'open' }, returning: 'count' }
       const take = transaction => entries.patchWhere({ ...open, data: { status: 'held' }, transaction }, workspaceA())
@@ -440,7 +503,7 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
       for (const [method, waiter] of Object.entries(second)) {
         await seedLedger(fixture)
         let first
-        const outcome = await whileWaiting({ snapshotIsolation, hold: async transaction => { first = await take(transaction) }, write: () => {}, waiter })
+        const outcome = await whileWaiting({ snapshotIsolation: setting, hold: async transaction => { first = await take(transaction) }, write: () => {}, waiter })
           .then(result => result.meta.count, error => error)
         assert.equal(first.meta.count, 1)
         // With snapshot isolation, InnoDB refuses the stale row instead.
@@ -448,6 +511,53 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
         else assert.equal(outcome, 0, method)
         const row = await fixture.knex('da_entries').where({ id: 1 }).first()
         assert.deepEqual({ status: row?.status, amount: Number(row?.amount) }, { status: 'held', amount: 10 }, method)
+      }
+    })
+  }
+
+  // A selection inside a transaction that has read plainly: on MySQL and MariaDB the
+  // snapshot is that first read's, so only a locking selection sees what committed since.
+  for (const snapshotIsolation of isMysql ? ['OFF', 'ON'] : [undefined]) {
+    const name = snapshotIsolation ? ` (innodb_snapshot_isolation ${snapshotIsolation})` : ''
+    it(`patchWhere and deleteWhere select the rows committed since the transaction first read${name}`, { skip: !serverDatabase && 'needs a second connection' }, async t => {
+      const setting = await snapshotSetting(t, snapshotIsolation)
+      if (setting === null) return
+      const entries = fixture.api.resources.da_entries
+      const writes = {
+        patchWhere: transaction => entries.patchWhere({ filters: { status: 'swept' }, data: { amount: 7 }, returning: 'count', transaction }, workspaceA()),
+        deleteWhere: transaction => entries.deleteWhere({ filters: { status: 'swept' }, returning: 'count', transaction }, workspaceA())
+      }
+      for (const [method, write] of Object.entries(writes)) {
+        await seedLedger(fixture)
+        let plain
+        const outcome = await fixture.api.transaction(async transaction => {
+          if (setting) await transaction.raw(`SET SESSION innodb_snapshot_isolation = ${setting}`)
+          try {
+            // The transaction's first plain read, answered before anything else commits: on MySQL and MariaDB
+            // it fixes the transaction's snapshot.
+            assert.equal(String((await entries.get({ id: '1', transaction }, workspaceA())).id), '1')
+            // Then another connection commits a new matching row and a row changed to match.
+            await fixture.knex.transaction(async other => {
+              await other('da_entries').insert(newEntry('50', { status: 'swept' }))
+              await other('da_entries').where({ id: 2 }).update({ status: 'swept' })
+            })
+            // A plain read now still answers that snapshot on MySQL and MariaDB, without either row, so only a
+            // locking selection writes them; PostgreSQL's next statement reads what is committed.
+            plain = (await transaction('da_entries').where({ workspace_id: 'ws-a', status: 'swept' }).orderBy('id').pluck('id')).map(String)
+            return (await write(transaction)).meta.count
+          } finally {
+            if (setting) await transaction.raw('SET SESSION innodb_snapshot_isolation = DEFAULT')
+          }
+        }).catch(error => error)
+        assert.deepEqual(plain, isMysql ? [] : ['2', '50'], `${method}: ${outcome?.message ?? 'the plain read'}`)
+        // With snapshot isolation, InnoDB refuses the row that changed since the snapshot instead.
+        if (snapshotIsolation === 'ON') {
+          assert.match(String(cause(outcome)?.message), /changed since last read/i, method)
+          continue
+        }
+        assert.equal(outcome, 2, method)
+        const rows = await fixture.knex('da_entries').whereIn('id', [2, 50]).orderBy('id')
+        assert.deepEqual(rows.map(row => Number(row.amount)), method === 'patchWhere' ? [7, 7] : [], method)
       }
     })
   }

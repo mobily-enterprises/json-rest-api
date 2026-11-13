@@ -370,6 +370,20 @@ lock waited is returned with its new values, so it can come out of order, as
 PostgreSQL documents for `ORDER BY` with `FOR UPDATE`. An invalid `sort` or
 `limit` throws `RestApiValidationError` before any statement.
 
+`after` pages a lock past 1,000 rows. `lockWhere({ filters, limit: 1000, after,
+transaction })` locks, in id order, only the rows after the id `after` names;
+start with no `after`, pass the last id of each page as the next one's, and
+stop at a page shorter than `limit`. It takes no `sort` (the pages follow the
+id), and on MySQL and MariaDB it needs the index an id order needs. A locking
+read sees the latest committed rows whatever the transaction's snapshot, so this
+is the way to read more than 1,000 current rows inside a transaction that has
+already read plainly on MySQL or MariaDB, where REPEATABLE READ fixed the
+snapshot at that first plain read. The pages are locked one after another:
+PostgreSQL does not keep new rows out of a page already locked, so when the
+whole set must stay as read until commit, have every writer of those rows lock
+one row that governs them (their parent, say) first, and lock it too before
+reading.
+
 On MySQL and MariaDB, InnoDB locks every row a locking read examines, and every
 gap between them, until commit. Ordering by id could make it walk the primary
 key across every owner's rows, so there `lockWhere` forces (`FORCE INDEX`) an

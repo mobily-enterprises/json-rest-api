@@ -121,7 +121,7 @@ export async function deleteWhereMethod (args) {
     requireWhereScope({ filters, all: params.all, missing: params.missing, operation: 'deleteWhere' })
     await beginWriteTransaction(context, params.transaction, helpers.newTransaction, args.runHooks)
     context.db = context.transaction
-    const ids = await visibleIdsByFilters(args, filters)
+    const ids = await visibleIdsByFilters(args, filters, 'update')
     if (!ids.length) {
       await commitOwnedTransaction(context)
       return deleteResponse(context, scopeName, [])

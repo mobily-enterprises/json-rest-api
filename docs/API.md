@@ -1327,7 +1327,7 @@ await resource.deleteWhere({ filters | all: true, returning, chunkSize, transact
 | `onlyIf` | Compare-and-set: only rows whose stored values equal these change and are returned. |
 | `missing` | Id lists only: `'throw'` (default; `RestApiRecordsNotFoundError`, 404) or `'skip'` for ids the caller cannot see. `patchWhere` and `deleteWhere` refuse it: they write the rows their selection finds, with the scope and filters inside each write, and return only the rows written. |
 | `chunkSize` | Rows per statement (default 500), lowered to the database's parameter limit. |
-| `lockMode` | `patchWhere` only: the row lock its selection takes before the write, as for the lock reads below. |
+| `lockMode` | `patchWhere` only: the row lock its selection takes before the write, as for the lock reads below. On MySQL and MariaDB the selection of `patchWhere` and `deleteWhere` is itself a locking read in that mode (`deleteWhere`: `FOR UPDATE`), which sees the rows committed since the transaction's first plain read, as `UPDATE … WHERE` does. |
 | `transaction` | A transaction from `api.transaction` to join; otherwise the call owns one. |
 
 Each call is all-or-nothing. Every row is validated, stamped, passed through
@@ -1356,7 +1356,7 @@ many-to-many or reverse relationships, file fields, or positions.
 ```javascript
 await api.transaction(async transaction => {
   const { data: locked } = await resource.lockByIds({ ids, transaction, missing, lockMode, format, queryParams: { fields } }, context)
-  const { data: matching } = await resource.lockWhere({ filters, sort, limit, transaction, lockMode, format, queryParams: { fields } }, context)
+  const { data: matching } = await resource.lockWhere({ filters, sort, limit, after, transaction, lockMode, format, queryParams: { fields } }, context)
   const { data: taken } = await resource.claim({ filters, sort, limit, transaction, lockMode, format, queryParams: { fields } }, context)
 })
 ```
@@ -1376,9 +1376,11 @@ including rows that start to match meanwhile; more than 1,000 throw
 `RestApiRowLimitError`. With `sort` (stored fields, `'-'` for descending) it
 locks and returns them in that order, then by id, and with `limit` (1 to 1,000)
 it locks only the first `limit` of them, by id without a `sort`, and throws no
-`RestApiRowLimitError`. On MySQL and MariaDB it forces an index that starts
+`RestApiRowLimitError`. `after` (an id; no `sort`) locks only the rows after
+it, in id order, so a caller pages past 1,000 rows by passing each page's
+last id to the next. On MySQL and MariaDB it forces an index that starts
 with the whole ownership columns (or, without ownership conditions, a filtered
-column), with no `ORDER BY` unless `sort` or `limit` asks for one, when the
+column), with no `ORDER BY` unless `sort`, `limit` or `after` asks for one, when the
 index must read the rows in that order, and throws
 `RestApiBulkWriteUnsupportedError` when the table has no such index.
 `claim` takes up to `limit` (default 1, at most 1,000) matching rows that no

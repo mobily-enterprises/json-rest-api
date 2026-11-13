@@ -7,7 +7,7 @@ import { filterResponseFields, getResourceFieldset } from '../lib/querying-writi
 import { getRequestedComputedFields, validateRequestedFieldsets } from '../lib/querying-writing/knex-field-helpers.js'
 import { resolveFormat } from '../lib/querying-writing/response-options.js'
 import { transformJsonApiToSimplified } from '../lib/querying-writing/simplified-helpers.js'
-import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
+import { normalizeResourceId, requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { chunk } from '../lib/storage/many-row-data-helpers.js'
 import { assertBlobReads, columnsWithoutBlobs } from '../lib/querying-writing/blob-fields.js'
 import { filterToOneResponseLinkage, snapshotReadRecord } from './common.js'
@@ -213,21 +213,27 @@ function lockSort (sortParam, schema) {
  * or `limit` it locks and answers the rows in `sort` order (stored fields, then
  * id; by id with `limit` alone); without either, in id order, and on MySQL and
  * MariaDB in the order of the index the read is forced onto (see dataLockWhere).
+ * `after` (an id) pages in id order: it locks only the rows after that id, so
+ * a caller locks more than 1,000 rows as pages of `limit`, each starting after
+ * the last id of the one before, until a page comes back short.
  * @param {any} args
  */
 export async function lockWhereMethod (args) {
-  const { params, context, vars, helpers, scope, scopes, runHooks, hasHooks, hookNames, scopeName } = args
+  const { params, context, vars, helpers, scope, scopes, runHooks, hasHooks, hookNames, scopeName, scopeOptions } = args
   const lockMode = await setupLockRead(args, 'lockWhere', 'dataLockWhere')
   const filters = validateFilters({ filters: params.filters, scopeName, schemaInfo: context.schemaInfo, vars })
   const { limit } = params
   if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LOCK_WHERE)) {
     throw invalid('limit', `limit must be an integer from 1 to ${MAX_LOCK_WHERE}`)
   }
+  const after = params.after === undefined ? undefined : normalizeResourceId(params.after, { scopeOptions, vars })
+  if (after === null) throw invalid('after', 'after must be the id of the last row the previous page locked')
+  if (after !== undefined && params.sort !== undefined) throw invalid('after', 'after pages in id order, so it takes no sort')
   const sort = params.sort === undefined ? undefined : lockSort(params.sort, context.schemaInfo.schemaStructure)
   assertBlobReads({ context, scopes, scopeName, rows: MAX_LOCK_WHERE + 1, operation: 'lockWhere' })
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', lock: true } })
-  const order = sort ?? (limit === undefined ? undefined : [])
-  const document = await helpers.dataLockWhere({ scopeName, context, runHooks, filters, limit: limit ?? MAX_LOCK_WHERE + 1, order, lockMode })
+  const order = sort ?? (limit === undefined && after === undefined ? undefined : [])
+  const document = await helpers.dataLockWhere({ scopeName, context, runHooks, filters, limit: limit ?? MAX_LOCK_WHERE + 1, order, after, lockMode })
   if (limit === undefined && document.data.length > MAX_LOCK_WHERE) {
     throw new RestApiRowLimitError({ resourceType: scopeName, rowLimit: MAX_LOCK_WHERE, operation: 'lockWhere' })
   }
