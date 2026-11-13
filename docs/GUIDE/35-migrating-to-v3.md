@@ -444,12 +444,13 @@ of its own, or leave the database out of the client's settings. A test or
 budget that counts a read's statements counts one fewer for each linked type
 that now needs no read.
 
-## Current selections and lock pages (3.1.9)
+## Current selections, lock pages and ignored upserts with ids (3.1.9)
 
 | 3.1.8 | 3.1.9 |
 | --- | --- |
 | on MySQL and MariaDB `patchWhere` and `deleteWhere` read their selection plainly, from the transaction's snapshot: inside a transaction that had already read plainly, they left out rows committed since | the selection is a locking read in the write's lock mode, which reads the latest committed rows, as `UPDATE … WHERE` does; the same statements |
 | `lockWhere` locked at most 1,000 rows | `after` (an id) pages it in id order: only the rows after that id |
+| an upsert row could not carry an `id`, so a table keyed by a UUID the caller generates had no insert-or-ignore | an ignore's rows may carry the ids they insert with; a row whose keys match keeps the stored id, and an id another row has, under other keys, fails as a duplicate; a merge's rows still carry none |
 
 Upgrading: on MySQL and MariaDB a selection write now locks the rows its
 selection examines from that read on, where it locked the rows it selected a

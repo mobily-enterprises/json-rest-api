@@ -247,19 +247,23 @@ describe(`Data-access hardening (${storageMode.mode})`, () => {
   })
 
   describe('upserts', { skip: tableOnly }, () => {
-    it('refuses ids and repeated keys, whatever the action', async () => {
+    it('refuses repeated keys whatever the action, and a merge row with an id; an ignore row with another workspace\'s id never reaches its row', async () => {
       await resetAll()
       await fixture.seed('da_labels', [
         { id: '1', name: 'urgent', color: 'red', slug: 'a-urgent', workspace_id: 'ws-a' },
         { id: '2', name: 'urgent', color: 'blue', slug: 'b-urgent', workspace_id: 'ws-b' }
       ])
       const labels = fixture.api.resources.da_labels
+      const byName = action => ({ keys: ['workspace_id', 'name'], action, ...(action === 'merge' ? { merge: ['color'] } : {}) })
       for (const action of ['ignore', 'merge']) {
-        const onConflict = { keys: ['workspace_id', 'name'], action, ...(action === 'merge' ? { merge: ['color'] } : {}) }
-        // An explicit id would reach workspace B's row through the primary key.
-        await assert.rejects(labels.postMany({ data: [{ id: '2', name: 'urgent', color: 'black' }], onConflict }, workspaceA()), isA(RestApiValidationError), action)
-        await assert.rejects(labels.postMany({ data: [{ name: 'twice', color: 'a' }, { name: 'twice', color: 'b' }], onConflict }, workspaceA()), isA(RestApiValidationError), action)
+        await assert.rejects(labels.postMany({ data: [{ name: 'twice', color: 'a' }, { name: 'twice', color: 'b' }], onConflict: byName(action) }, workspaceA()), isA(RestApiValidationError), action)
       }
+      // An explicit id would reach workspace B's row through the primary key. A merge refuses it; an ignore never
+      // updates, and skips the row when its keys match the caller's own row or fails on the id as a duplicate.
+      await assert.rejects(labels.postMany({ data: [{ id: '2', name: 'urgent', color: 'black' }], onConflict: byName('merge') }, workspaceA()), isA(RestApiValidationError))
+      const skipped = await labels.postMany({ data: [{ id: '2', name: 'urgent', color: 'black' }], returning: 'minimal', onConflict: byName('ignore') }, workspaceA())
+      assert.deepEqual(skipped.data, [])
+      await assert.rejects(labels.postMany({ data: [{ id: '2', name: 'other', color: 'black' }], onConflict: byName('ignore') }, workspaceA()))
       assert.deepEqual((await fixture.rows('da_labels')).map(row => [row.workspace_id, row.color]), [['ws-a', 'red'], ['ws-b', 'blue']])
     })
 

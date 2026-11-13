@@ -263,8 +263,11 @@ export default async function postManyMethod ({
       rows.forEach((row, index) => {
         const id = row.inputRecord.data.id
         if (byId && (id === undefined || id === null)) throw atIndex(new RestApiValidationError('An upsert on the id needs an id in every row', { fields: ['data.id'] }), index)
-        if (byId || id === undefined || id === null) return
-        throw atIndex(new RestApiValidationError('An upsert row cannot carry an id: its conflict keys identify it', { fields: ['data.id'] }), index)
+        // An ignore inserts a row with the id it carries, or skips it when its keys match a stored row, which keeps
+        // its own id; an id another row has, under other keys, still fails as a duplicate. A merge's keys name the
+        // row it updates, so an id there would be a second, conflicting identity.
+        if (byId || id === undefined || id === null || conflict.action === 'ignore') return
+        throw atIndex(new RestApiValidationError('An onConflict merge row cannot carry an id: its conflict keys identify the row it updates', { fields: ['data.id'] }), index)
       })
       if (!byId) {
         rows.forEach((row, index) => {

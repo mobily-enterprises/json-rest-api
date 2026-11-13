@@ -242,6 +242,39 @@ describe(`Many-row writes (${storageMode.mode})`, () => {
           ['b-urgent', 'urgent', 'blue', 'ws-b']
         ])
       })
+
+      it('inserts an ignore row with the id it carries, skips a duplicate by the keys, and fails on an id another row has', { skip: idKeysOnly }, async () => {
+        await fixture.reset()
+        await fixture.seed('da_labels', [
+          { id: '1', name: 'urgent', color: 'red', slug: 'a-urgent', workspace_id: 'ws-a' },
+          { id: '2', name: 'urgent', color: 'blue', slug: 'b-urgent', workspace_id: 'ws-b' }
+        ])
+        const labels = fixture.api.resources.da_labels
+        const byName = action => ({ keys: ['workspace_id', 'name'], action, ...(action === 'merge' ? { merge: ['color'] } : {}) })
+        const ignored = await labels.postMany({
+          data: [{ id: '7', name: 'urgent', color: 'black', slug: 'a-again' }, { id: '8', name: 'fresh', color: 'green', slug: 'a-fresh' }],
+          returning: 'minimal',
+          onConflict: byName('ignore')
+        }, workspaceA())
+        assert.deepEqual(ignored.data.map(item => String(item.id)), ['8'])
+        // Row 1's id under other keys, and another workspace's row 2's: a duplicate each, never skipped.
+        const duplicate = (error) => {
+          for (let cause = error; cause; cause = cause.cause) {
+            if (['23505', 'ER_DUP_ENTRY', 'SQLITE_CONSTRAINT_PRIMARYKEY', 'SQLITE_CONSTRAINT_UNIQUE'].includes(cause.code)) return true
+          }
+          return false
+        }
+        for (const id of ['1', '2']) {
+          await assert.rejects(labels.postMany({ data: [{ id, name: 'other', color: 'white' }], onConflict: byName('ignore') }, workspaceA()), duplicate, id)
+        }
+        await assert.rejects(labels.postMany({ data: [{ id: '9', name: 'urgent', color: 'pink' }], onConflict: byName('merge') }, workspaceA()), isA(RestApiValidationError))
+        const after = await fixture.knex('da_labels').orderBy('id')
+        assert.deepEqual(after.map(row => [String(row.id), row.name, row.color, row.workspace_id]), [
+          ['1', 'urgent', 'red', 'ws-a'],
+          ['2', 'urgent', 'blue', 'ws-b'],
+          ['8', 'fresh', 'green', 'ws-a']
+        ])
+      })
     })
 
     it('verifies MySQL insert ids against the inserted rows', { skip: databaseClient !== 'mysql2' && 'MySQL and MariaDB only' }, async () => {

@@ -32,7 +32,8 @@ export type ManyRowCreateInput<Input extends object, Type extends string> =
   { data: Array<Partial<Input> & { id?: InputResourceId }>; document?: never } |
   { data?: never; document: { data: Array<JsonApiWriteDocument<Input, Type>['data']> } }
 export interface UpsertOptions<Input extends object> {
-  // Must include every ownership (autofilter) field. Rows may not carry an id or repeat a key.
+  // Must include every ownership (autofilter) field, and no two rows may repeat a key. An ignore's
+  // rows may carry the ids they insert with; a merge's may not, since its keys identify the row.
   // ['id'] (or the idProperty) alone is allowed on a resource without ownership fields or a
   // row policy; every row then carries its id.
   keys: Array<keyof Input & string> | ['id']

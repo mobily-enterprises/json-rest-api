@@ -297,9 +297,14 @@ if (changed.data.length === 0) {
 
 `onConflict: { keys, action, merge }` turns `postMany` into an upsert.
 `keys` are the stored fields of a unique index. Each row must give them values,
-no two rows may repeat them, and rows may not carry an `id`: the keys identify
-the record. On a resource with no autofilter (ownership) fields and no row
-policy, `keys: ['id']` makes the id itself the key (the `idProperty` name, such
+and no two rows may repeat them. A merge's rows may not carry an `id`: the keys
+identify the record it updates. An ignore's rows may carry the ids they insert
+with, as a table keyed by a random UUID the caller generates needs: a row whose
+keys match a stored record is skipped, and that record keeps its own id, while
+an id that another record already has, under other keys, fails the batch as a
+duplicate on every database rather than being skipped. On a resource with no
+autofilter (ownership) fields and no row policy, `keys: ['id']` makes the id
+itself the key (the `idProperty` name, such
 as `email` for a natural key, means the same); every row then carries its id,
 and the primary key is the unique index. There is no other owner whose row the
 id could match, so this is the atomic create-if-missing for such tables.
