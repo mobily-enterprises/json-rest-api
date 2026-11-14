@@ -363,12 +363,35 @@ With `returning: 'count'` an upsert counts the rows it inserted, and with
 
 `ignore` runs `INSERT … ON CONFLICT DO NOTHING` on PostgreSQL and SQLite. On
 MySQL and MariaDB, whose `ON DUPLICATE KEY` fires on every unique index, it
-reads the matching keys under a row lock and inserts the rest. With `merge`,
-and with `ignore` on MySQL and MariaDB, two transactions that upsert the same
-new key at the same time can fail with a unique-key error (PostgreSQL 23505)
-or a deadlock (MySQL 1213); retry the batch. InnoDB keeps the locks of every
-row a locking read examined until the transaction ends, so keep upserting
-transactions short.
+finds the stored keys first and inserts only the other rows.
+
+On MySQL and MariaDB a locking read of a key no row holds would lock the gap
+where the key would go, and two transactions that each did so for new keys in
+one gap, then inserted them, would deadlock on each other's gap lock. So there
+`ignore` and `merge` read the keys plainly, which locks nothing, lock only the
+rows that read finds (by their stored keys, which locks those rows alone), and
+insert the other rows with a plain INSERT, which takes no gap lock and waits
+only for an uncommitted row with its key. A row the plain read missed, because
+it was committed after the transaction's first read or while the INSERT waited
+for it, fails that INSERT statement as a duplicate key. The database undoes
+that one statement and the transaction goes on: the rows of that statement and
+of the ones after it are then read under a row lock, `ignore` skips the ones
+found and `merge` merges them, and the rest are inserted. The batch does not
+fail for it. That first read is a plain read like any other: when it is the
+transaction's first, it fixes the snapshot every later plain read of the
+transaction answers from, even after a lock that waited (see
+[Guide 19](19-managed-transactions.md#writes-beside-other-transactions)). Take
+the locks the transaction decides on before its first upsert, as before its
+first plain read.
+
+Two transactions that upsert the same new key at the same time can still fail
+with a unique-key error (PostgreSQL 23505) or a deadlock (MySQL 1213); retry the
+batch. On MySQL and MariaDB a deleted row's key stays in the index until InnoDB
+purges it, shortly after the delete commits, and an INSERT of that key in the
+meantime checks the deleted entry with a shared lock on it and the gap before
+it: upserts that re-create keys deleted moments before can still wait for each
+other, or deadlock. InnoDB keeps the locks of every row a locking read examined
+until the transaction ends, so keep upserting transactions short.
 
 A single `put` creates a record at the id the caller chose, and is the one
 write that tells an id taken by another owner or hidden from the caller
@@ -378,9 +401,10 @@ leak between owners, let the server choose them: create with `post` or
 `postMany` (or upsert on keys that include the owner) and keep `put` for
 records the caller already has.
 
-`merge` on every database, and `ignore` on MySQL and MariaDB, find the rows
-that match the conflict keys with a locking read of the bare table, before the
-caller's scope is checked. A matching row the caller cannot see, such as one a
+`merge` on every database, and `ignore` on MySQL and MariaDB, lock the rows
+that match the conflict keys with a locking read of the bare table (on MySQL and
+MariaDB, the rows a plain read of the bare table finds), before the caller's
+scope is checked. A matching row the caller cannot see, such as one a
 `knexQueryFiltering` hook hides, is therefore locked until commit, and waited
 for while another transaction holds it, as `lockByIds` does with a hidden id
 (see [scoped reads and locks](34-scoped-reads-and-locks.md)). `merge` then fails

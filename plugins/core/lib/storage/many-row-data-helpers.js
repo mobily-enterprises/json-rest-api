@@ -3,6 +3,7 @@
 // runs one statement per chunk; none of them runs through the filter hooks, so
 // MySQL never sees an UPDATE or DELETE whose subquery reads its own table.
 import { RestApiBulkInsertIdsError, RestApiBulkWriteUnsupportedError, RestApiResourceError, RestApiValidationError } from '../../../../lib/rest-api-errors.js'
+import { handledQueryError } from '../../../../lib/error-context.js'
 import { withQueryFilteringContext } from '../querying/query-builder-utils.js'
 import { lockConditionSubqueries } from '../querying/subquery-locks.js'
 import { ANY_OWNER, applyWriteConditions, hasWriteConditions, writeConditions } from '../querying/query-constraint.js'
@@ -32,6 +33,13 @@ const LOCK_MODES = new Set(['update', 'noKeyUpdate', 'share'])
 
 /** A column's value as text, for a canonical row's logical id. @param {any} db @param {string} column */
 const textOf = (db, column) => db.raw(databaseFamily(db) === 'mysql' ? 'CAST(?? AS CHAR)' : 'CAST(?? AS TEXT)', [column])
+
+/**
+ * A MySQL or MariaDB duplicate-key error (ER_DUP_ENTRY, ER_DUP_ENTRY_WITH_KEY_NAME):
+ * the statement that met it is undone, and the transaction goes on.
+ * @param {any} error
+ */
+export const isDuplicateKeyError = error => error?.errno === 1062 || error?.errno === 1586
 
 /**
  * Refuses a selection write on MySQL or MariaDB whose scope joins a derived
@@ -264,17 +272,19 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
    * The stored identifier of the row each input row matches by `keys`, or
    * undefined, read with a row lock (SQLite's single writer needs none), one
    * statement per chunk. Upserts decide from it which rows to insert and which
-   * to merge.
-   * @param {{ scopeName: string, context: any, rows: Record<string, unknown>[], keys: string[], chunkSize: number }} request
+   * to merge. With `lock: false` a plain read, which locks nothing: on MySQL
+   * and MariaDB under REPEATABLE READ it answers from the transaction's
+   * snapshot, so its answer is only where to look (see insertIgnoringOnMysql).
+   * @param {{ scopeName: string, context: any, rows: Record<string, unknown>[], keys: string[], chunkSize: number, lock?: boolean }} request
    * @returns {Promise<Array<string | number | undefined>>}
    */
-  const dataIdsByKeys = async ({ scopeName, context, rows, keys, chunkSize }) => {
+  const dataIdsByKeys = async ({ scopeName, context, rows, keys, chunkSize, lock = true }) => {
     const storageAdapter = adapterFor(scopeName)
     const db = context.transaction
     const tableName = storageAdapter.getTableName()
     const keyColumns = keys.map(field => storageAdapter.translateColumn(field))
     await requireUniqueKeys({ scopeName, db, tableName, keyColumns, canonical: canonicalOf(scopeName, storageAdapter) })
-    await takeSqliteWriteLock(db, tableName, storageAdapter.getIdColumn())
+    if (lock) await takeSqliteWriteLock(db, tableName, storageAdapter.getIdColumn())
     const storageRows = rows.map(attributes => newStorageRow(scopeName, storageAdapter, attributes, context))
     const matcher = conflictKeyMatcher(scopes[scopeName].vars.schemaInfo.schemaStructure, keys, keyColumns)
     const inputKeys = rows.map((attributes, index) => matcher.input(attributes, storageRows[index]))
@@ -284,7 +294,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
       const query = rowsOf(storageAdapter, db)
         .whereIn(keyColumns, part.map(row => keyColumns.map(column => row[column] ?? null)))
         .select({ id: databaseIdentityExpression(db, storageAdapter.getIdColumn()) }, ...keyColumns)
-      for (const row of await applyDatabaseReadOptions(lockRows(query, db))) {
+      for (const row of await applyDatabaseReadOptions(lock ? lockRows(query, db) : query)) {
         const key = matcher.stored(row)
         // The database matched by its own comparison (a collation, say); merging or skipping would guess.
         if (!wanted.has(key)) {
@@ -304,13 +314,67 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
   )
 
   /**
-   * Insert validated rows with one statement per chunk and column set.
-   * Returns the stored identifier for each input row (undefined for rows an
-   * ignore conflict skipped), or nothing when `needIds` is false.
-   * @param {{ scopeName: string, context: any, rows: Record<string, unknown>[], chunkSize: number, needIds: boolean, onConflict?: { keys: string[], action: 'ignore' } }} request
+   * An ignore upsert on MySQL and MariaDB, whose ON DUPLICATE KEY fires on
+   * every unique index, the primary key included: the rows whose keys a stored
+   * row holds are left out, and the others go in with a plain INSERT, so a
+   * clash on any other unique index fails the batch.
+   * A locking read of a key no row holds locks the gap where the key would
+   * go, and gap locks never wait for each other: two transactions that each
+   * read a new key in one gap that way, then insert it, each wait for the
+   * other's gap lock, a deadlock. So the keys are first read plainly, which
+   * locks nothing; the rows it finds no match for go in at once, and an INSERT
+   * takes no gap lock (it waits only for an uncommitted row with its key). The
+   * rows it finds are locked by their keys, which as stored keys lock those
+   * rows alone; one deleted since the transaction's snapshot is inserted after
+   * all. A row the plain read missed, committed since the snapshot or while the
+   * INSERT waited for it, fails that INSERT's statement as a duplicate key,
+   * which undoes the statement only: the rows from that statement on are then
+   * read with the lock, as before, and only the missing ones inserted.
+   * @param {{ scopeName: string, context: any, rows: Record<string, unknown>[], chunkSize: number, needIds: boolean, keys: string[] }} request
    * @returns {Promise<Array<string | number | undefined> | undefined>}
    */
-  const dataInsertMany = async ({ scopeName, context, rows, chunkSize, needIds, onConflict }) => {
+  const insertIgnoringOnMysql = async ({ scopeName, context, rows, chunkSize, needIds, keys }) => {
+    /** @type {Array<string | number | undefined>} */
+    const ids = new Array(rows.length)
+    /** @param {number[]} indexes */
+    const lockThenInsert = async indexes => {
+      const existing = await dataIdsByKeys({ scopeName, context, rows: indexes.map(index => rows[index]), keys, chunkSize })
+      const missing = indexes.filter((_index, position) => existing[position] === undefined)
+      const inserted = missing.length
+        ? await dataInsertMany({ scopeName, context, rows: missing.map(index => rows[index]), chunkSize, needIds })
+        : []
+      missing.forEach((index, position) => { ids[index] = inserted?.[position] })
+    }
+    const seen = await dataIdsByKeys({ scopeName, context, rows, keys, chunkSize, lock: false })
+    const stored = rows.flatMap((_row, index) => seen[index] === undefined ? [] : [index])
+    const fresh = rows.flatMap((_row, index) => seen[index] === undefined ? [index] : [])
+    if (stored.length) await lockThenInsert(stored)
+    if (fresh.length) {
+      const written = new Map()
+      try {
+        await dataInsertMany({ scopeName, context, rows: fresh.map(index => rows[index]), chunkSize, needIds, written })
+      } catch (error) {
+        if (!isDuplicateKeyError(error)) throw error
+        handledQueryError(context.transaction, error)
+      }
+      fresh.forEach((index, position) => { if (written.has(position)) ids[index] = written.get(position) })
+      const rest = fresh.filter((_index, position) => !written.has(position))
+      if (rest.length) await lockThenInsert(rest)
+    }
+    return needIds ? ids : undefined
+  }
+
+  /**
+   * Insert validated rows with one statement per chunk and column set.
+   * Returns the stored identifier for each input row (undefined for rows an
+   * ignore conflict skipped), or nothing when `needIds` is false. `written`
+   * (without onConflict) records each row once its statement has run, by its
+   * position in `rows`, with its stored identifier when the insert reads them:
+   * when a later statement fails, it tells which rows are in.
+   * @param {{ scopeName: string, context: any, rows: Record<string, unknown>[], chunkSize: number, needIds: boolean, onConflict?: { keys: string[], action: 'ignore' }, written?: Map<number, string | number | undefined> }} request
+   * @returns {Promise<Array<string | number | undefined> | undefined>}
+   */
+  const dataInsertMany = async ({ scopeName, context, rows, chunkSize, needIds, onConflict, written }) => {
     const storageAdapter = adapterFor(scopeName)
     const db = context.transaction
     const tableName = storageAdapter.getTableName()
@@ -319,18 +383,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     /** @type {Array<string | number | undefined>} */
     const ids = new Array(rows.length)
 
-    if (onConflict && family === 'mysql') {
-      // ON DUPLICATE KEY fires on every unique index, the primary key included:
-      // lock the rows that match by the keys, then insert only the others with a
-      // plain INSERT, so a clash on any other unique index fails the batch.
-      const existing = await dataIdsByKeys({ scopeName, context, rows, keys: onConflict.keys, chunkSize })
-      const missing = rows.flatMap((_row, index) => existing[index] === undefined ? [index] : [])
-      const inserted = missing.length
-        ? await dataInsertMany({ scopeName, context, rows: missing.map(index => rows[index]), chunkSize, needIds })
-        : []
-      missing.forEach((index, position) => { ids[index] = inserted?.[position] })
-      return needIds ? ids : undefined
-    }
+    if (onConflict && family === 'mysql') return insertIgnoringOnMysql({ scopeName, context, rows, chunkSize, needIds, keys: onConflict.keys })
 
     const canonical = canonicalOf(scopeName, storageAdapter)
     const storageRows = rows.map(attributes => newStorageRow(scopeName, storageAdapter, attributes, context))
@@ -366,6 +419,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
 
         if (!readIds && !generated) {
           await query
+          for (const index of part) written?.set(index, undefined)
           continue
         }
 
@@ -405,7 +459,10 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
           await rowsOf(storageAdapter, db).whereIn(CANONICAL_ROW_ID, stored).update({ [idColumn]: textOf(db, CANONICAL_ROW_ID) })
           stored = stored.map(id => String(id))
         }
-        part.forEach((index, position) => { ids[index] = stored[position] })
+        part.forEach((index, position) => {
+          ids[index] = stored[position]
+          written?.set(index, stored[position])
+        })
       }
     }
     if (arbiter && !arbiter.exact) {

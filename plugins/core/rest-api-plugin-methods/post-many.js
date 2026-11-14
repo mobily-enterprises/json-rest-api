@@ -5,9 +5,9 @@ import { processRelationships } from '../lib/writing/relationship-processor.js'
 import { getRequestContracts, validateRequestContractOrThrow } from '../lib/querying-writing/request-contracts.js'
 import { requireDocumentResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
-import { beginWriteTransaction } from '../../../lib/error-context.js'
+import { beginWriteTransaction, handledQueryError } from '../../../lib/error-context.js'
 import { RestApiResourceError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
-import { chunk } from '../lib/storage/many-row-data-helpers.js'
+import { chunk, isDuplicateKeyError } from '../lib/storage/many-row-data-helpers.js'
 import { databaseFamily } from '../lib/querying-writing/database-capabilities.js'
 import {
   applyFieldSetters,
@@ -96,6 +96,30 @@ function suppliedFields (row, beforeSetters, afterSetters) {
 }
 
 /**
+ * The stored record each row's conflict keys match, locked, for a merge.
+ * On MySQL and MariaDB a locking read of a key no row holds would lock the gap
+ * where it would go, and two transactions that each did so for a new key in
+ * one gap would deadlock on each other's gap lock when they insert it. There
+ * the keys are first read plainly, which locks nothing, and only the rows that
+ * read finds are locked by their keys, which as stored keys lock those rows
+ * alone. A row the plain read misses because it was committed since the
+ * transaction's snapshot fails the merge's INSERT as a duplicate key, and is
+ * merged after all (see mergeRows).
+ * @param {any} helpers
+ * @param {{ scopeName: string, context: any, attributes: Record<string, unknown>[], keys: string[], chunkSize: number }} request
+ * @returns {Promise<Array<string | number | undefined>>}
+ */
+async function lockedMatches (helpers, { scopeName, context, attributes, keys, chunkSize }) {
+  if (databaseFamily(context.transaction) !== 'mysql') return helpers.dataIdsByKeys({ scopeName, context, rows: attributes, keys, chunkSize })
+  const seen = await helpers.dataIdsByKeys({ scopeName, context, rows: attributes, keys, chunkSize, lock: false })
+  const stored = attributes.flatMap((_row, index) => seen[index] === undefined ? [] : [index])
+  const locked = stored.length ? await helpers.dataIdsByKeys({ scopeName, context, rows: stored.map(index => attributes[index]), keys, chunkSize }) : []
+  const existing = new Array(attributes.length)
+  stored.forEach((index, position) => { existing[index] = locked[position] })
+  return existing
+}
+
+/**
  * Upsert merge: lock the rows the conflict keys match, check that the caller
  * may patch each of them, insert the other rows with a plain INSERT (a clash on
  * any other unique index fails the batch), then update the matched rows by id
@@ -105,7 +129,7 @@ function suppliedFields (row, beforeSetters, afterSetters) {
  * @param {{ rows: any[], attributes: Record<string, unknown>[], supplied: Set<string>[], onConflict: { keys: string[], merge: string[] }, chunkSize: number, needIds: boolean }} batch
  */
 async function mergeRows ({ context, helpers, scope, scopes, runHooks, scopeName }, { rows, attributes, supplied, onConflict, chunkSize, needIds }) {
-  const existing = await helpers.dataIdsByKeys({ scopeName, context, rows: attributes, keys: onConflict.keys, chunkSize })
+  const existing = await lockedMatches(helpers, { scopeName, context, attributes, keys: onConflict.keys, chunkSize })
   const matched = attributes.flatMap((_row, index) => existing[index] === undefined ? [] : [index])
   const missing = attributes.flatMap((_row, index) => existing[index] === undefined ? [index] : [])
 
@@ -138,25 +162,52 @@ async function mergeRows ({ context, helpers, scope, scopes, runHooks, scopeName
     // fail as a duplicate. The INSERT skips a clash on the keys instead (a clash
     // on any other unique index still fails), and the rows it skipped, by then
     // committed, are locked, checked and merged like the others.
-    const skipsClashes = databaseFamily(context.transaction) === 'pg'
+    // On MySQL and MariaDB the keys were looked up plainly (see lockedMatches):
+    // a row committed since the snapshot, or committed while the INSERT waits
+    // for it, fails the INSERT's statement as a duplicate key, which undoes
+    // that statement only. Its rows, and those of the statements after it, are
+    // then locked by their keys: those found are merged like the others, and
+    // the rest inserted with a plain INSERT.
+    const family = databaseFamily(context.transaction)
+    const skipsClashes = family === 'pg'
     const insertRows = missing.map(index => attributes[index])
-    const inserted = skipsClashes
-      ? await helpers.dataInsertMany({ scopeName, context, rows: insertRows, chunkSize, needIds: true, onConflict: { keys: onConflict.keys, action: 'ignore' } })
-      : await helpers.dataInsertMany({ scopeName, context, rows: insertRows, chunkSize, needIds })
-    missing.forEach((index, position) => { ids[index] = inserted?.[position] })
-    const late = skipsClashes ? missing.filter(index => ids[index] === undefined) : []
+    let late = []
+    if (skipsClashes) {
+      const inserted = await helpers.dataInsertMany({ scopeName, context, rows: insertRows, chunkSize, needIds: true, onConflict: { keys: onConflict.keys, action: 'ignore' } })
+      missing.forEach((index, position) => { ids[index] = inserted?.[position] })
+      late = missing.filter(index => ids[index] === undefined)
+    } else {
+      const written = new Map()
+      try {
+        await helpers.dataInsertMany({ scopeName, context, rows: insertRows, chunkSize, needIds, written })
+      } catch (error) {
+        if (family !== 'mysql' || !isDuplicateKeyError(error)) throw error
+        handledQueryError(context.transaction, error)
+      }
+      missing.forEach((index, position) => { if (written.has(position)) ids[index] = written.get(position) })
+      late = missing.filter((_index, position) => !written.has(position))
+    }
     if (late.length) {
       const found = await helpers.dataIdsByKeys({ scopeName, context, rows: late.map(index => attributes[index]), keys: onConflict.keys, chunkSize })
-      late.forEach((index, position) => {
+      const absent = late.filter((_index, position) => found[position] === undefined)
+      if (skipsClashes && absent.length) {
         // Committed, then deleted before the lock: neither inserted nor merged.
-        if (found[position] === undefined) {
-          throw atIndex(new RestApiResourceError(`The ${scopeName} record these conflict keys match changed during the upsert; retry it`, { subtype: 'conflict', resourceType: scopeName }), index)
-        }
+        throw atIndex(new RestApiResourceError(`The ${scopeName} record these conflict keys match changed during the upsert; retry it`, { subtype: 'conflict', resourceType: scopeName }), absent[0])
+      }
+      if (absent.length) {
+        // No stored row holds their keys: they clashed on another unique index, which fails the batch here, or the row
+        // they met is gone again.
+        const inserted = await helpers.dataInsertMany({ scopeName, context, rows: absent.map(index => attributes[index]), chunkSize, needIds })
+        absent.forEach((index, position) => { ids[index] = inserted?.[position] })
+      }
+      const merged = late.filter((_index, position) => found[position] !== undefined)
+      late.forEach((index, position) => {
+        if (found[position] === undefined) return
         existing[index] = found[position]
         ids[index] = found[position]
       })
-      await checkMatched(late)
-      matched.push(...late)
+      await checkMatched(merged)
+      matched.push(...merged)
     }
   }
   if (matched.length) {

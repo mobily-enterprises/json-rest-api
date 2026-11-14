@@ -97,6 +97,13 @@ record as the snapshot does; `lockByIds` in the same transaction returns it as
 stored. PostgreSQL's plain and locking reads see the same rows, and SQLite has
 one writer.
 
+An `ignore` or `merge` upsert on MySQL and MariaDB first finds its keys with a
+plain read, and locks only the records that read finds ([Guide 27](27-many-row-writes.md#upserts)),
+so that it locks no gap where a new key would go. That read takes the
+snapshot when the transaction has none yet: a transaction that upserts before
+it locks reads plainly, after the lock, the rows as they stood at the upsert.
+Lock first, then upsert.
+
 A merge upsert whose keys match a row another transaction has inserted but not
 yet committed waits for that transaction. If it commits, the merge checks and
 merges into the row as into any other; if it rolls back, the merge inserts its

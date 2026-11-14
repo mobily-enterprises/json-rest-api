@@ -1476,6 +1476,89 @@ describe(`Many-row writes beside a concurrent commit (${storageMode.mode})`, { s
       if (!second.transaction.isCompleted()) await second.rollback()
     }
   })
+
+  // On MySQL and MariaDB a locking read of a key no row holds locks the gap where the key would go, and gap locks never
+  // wait for each other: two transactions that each hold one on a gap, then insert into it, each wait for the other's,
+  // a deadlock. An upsert reads its keys plainly and locks only the rows it finds, so new keys in one gap go in side
+  // by side. Each test inserts keys of its own: InnoDB checks a new key that a deleted row not yet purged held with a
+  // next-key lock, which the next test's insert beside it would wait for.
+  const outcomeOf = promise => promise.then(() => 'saved', error => String(error?.code ?? error))
+  const labelKeys = ['workspace_id', 'name']
+  const GAP_UPSERTS = {
+    'ignore on the owner and name': {
+      skip: idKeysOnly,
+      upsert: (transaction, n) => fixture.api.resources.da_labels.postMany({
+        data: [{ name: `gap ${n}` }], onConflict: { keys: labelKeys, action: 'ignore' }, returning: 'none', transaction
+      }, workspaceA()),
+      stored: async () => (await fixture.rows('da_labels')).map(row => row.name).sort()
+    },
+    'merge on the owner and name': {
+      skip: idKeysOnly,
+      upsert: (transaction, n) => fixture.api.resources.da_labels.postMany({
+        data: [{ name: `gap ${n} merged`, color: 'red' }], onConflict: { keys: labelKeys, action: 'merge', merge: ['color'] }, returning: 'none', transaction
+      }, workspaceA()),
+      stored: async () => (await fixture.rows('da_labels')).map(row => row.name.replace(' merged', '')).sort()
+    },
+    'ignore on the id': {
+      skip: false,
+      upsert: (transaction, n) => fixture.api.resources.da_counters.postMany({
+        data: [{ id: String(7000 + n), name: `gap ${n}` }], onConflict: { keys: ['id'], action: 'ignore' }, returning: 'none', transaction
+      }),
+      stored: async () => (await fixture.api.resources.da_counters.query({})).data.map(record => record.name).filter(name => name.startsWith('gap ')).sort()
+    }
+  }
+  const clearGapRows = async () => {
+    await fixture.reset()
+    const counters = (await fixture.api.resources.da_counters.query({})).data.map(record => record.id).filter(id => Number(id) >= 7000)
+    if (counters.length) await fixture.api.resources.da_counters.deleteMany({ ids: counters })
+  }
+
+  for (const [name, { skip, upsert, stored }] of Object.entries(GAP_UPSERTS)) {
+    it(`${name}: two transactions upserting new keys into one gap, interleaved, both save`, { skip }, async () => {
+      await clearGapRows()
+      const first = await holdManagedTransaction(fixture.api)
+      const second = await holdManagedTransaction(fixture.api)
+      let outcomes
+      try {
+        // The first transaction upserts key 1; the second, key 2, after it in the same gap; then the first, key 3.
+        await upsert(first.transaction, 1)
+        const secondConnection = await connectionId(second.transaction)
+        const pending = outcomeOf(upsert(second.transaction, 2))
+        // A gap-locking upsert waits here for the first transaction's gap lock; a plain one has already saved.
+        await waitForLockWait(fixture.knex, secondConnection, pending).catch(() => {})
+        const third = await outcomeOf(upsert(first.transaction, 3))
+        if (third === 'saved') await first.commit()
+        const other = await pending
+        if (other === 'saved') await second.commit()
+        outcomes = [third, other]
+      } finally {
+        for (const held of [first, second]) if (!held.transaction.isCompleted()) await held.rollback().catch(() => {})
+      }
+      assert.deepEqual(outcomes, ['saved', 'saved'])
+      assert.deepEqual(await stored(), ['gap 1', 'gap 2', 'gap 3'])
+    })
+  }
+
+  it('upserts of new keys in one gap from two transactions at once never deadlock: 20 rounds in each start order, no retry', { skip: idKeysOnly }, async () => {
+    await clearGapRows()
+    const outcomes = {}
+    for (const action of ['ignore', 'merge']) {
+      for (let round = 0; round < 20; round++) {
+        for (const order of ['ab', 'ba']) {
+          // Each name sorts after every stored one, so both rows go into the table's last gap for the owner.
+          const results = await Promise.all([...order].map(side => outcomeOf(fixture.api.transaction(transaction => fixture.api.resources.da_labels.postMany({
+            data: [{ name: `${action} ${String(round).padStart(2, '0')} ${order} ${side}`, color: 'red' }],
+            onConflict: { keys: labelKeys, action, ...(action === 'merge' ? { merge: ['color'] } : {}) },
+            returning: 'none',
+            transaction
+          }, workspaceA())))))
+          for (const result of results) outcomes[result] = (outcomes[result] ?? 0) + 1
+        }
+      }
+    }
+    assert.deepEqual(outcomes, { saved: 160 })
+    assert.equal((await fixture.rows('da_labels')).length, 160)
+  })
 })
 
 // An app that imports rows into a wide AnyAPI resource: 155 string fields, a
