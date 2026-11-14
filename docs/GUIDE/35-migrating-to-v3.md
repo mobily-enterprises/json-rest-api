@@ -482,6 +482,26 @@ transaction's snapshot can fail the lock (errno 1020; `40001`) where 3.1.9
 answered from the snapshot: retry the transaction. `claim`, SQLite and every
 read that takes no lock are unchanged.
 
+## Current link checks, primary-key locks and gap-free upserts (3.1.11)
+
+| 3.1.10 | 3.1.11 |
+| --- | --- |
+| a lock's to-one link check was a plain read, which on MySQL and MariaDB answers from the transaction's snapshot: a target committed after it showed as `null`; on PostgreSQL a lock could reuse an earlier check of the same targets | in `lockByIds` and `lockWhere` the check sees the targets as last committed: a shared-lock read on MySQL and MariaDB, a plain read on PostgreSQL, never an earlier check reused; `claim` is unchanged |
+| the SELECTs in a joining subquery's join conditions (`onExists`, an `onIn` over a subquery) stayed plain reads in a lock | they take the shared lock the lock's other nested SELECTs take |
+| on MySQL and MariaDB an `ignore` or `merge` upsert read its keys `FOR UPDATE`; for a key no row holds that locked the gap where it would go, so two transactions upserting new keys in one gap deadlocked (1213) | the keys are read plainly, only the rows found are locked, and the rest are inserted with a plain INSERT, which takes no gap lock; a row committed meanwhile fails only its INSERT statement as a duplicate key, and is then locked and skipped or merged, without failing the transaction |
+| a `lockWhere` list filter given one value (`codes: ['A']`) did not count as fixed, so a `sort` or `limit` behind it found no index | it counts as an equality, as the single value does |
+| on MySQL and MariaDB `lockByIds` could read, and lock, every row of the caller's owner through an index on the ownership columns that covered its columns | it reads the primary key (`FORCE INDEX (PRIMARY)`) and locks the listed rows alone |
+
+Upgrading: on MySQL and MariaDB an upsert's first read is now a plain read,
+which takes the transaction's snapshot when it has none yet: a transaction
+that upserted before it locked, and read plainly after the lock, now reads the
+rows as they stood at the upsert, so take its locks before the upsert. A test
+that counts an upsert's statements there counts one more read when some keys
+are already stored (the plain read, then the lock of the rows it found). A
+lock's link check on MySQL and MariaDB now holds the targets shared until
+commit, so a transaction that changes a target waits for it. Same-key races
+still fail with 23505 or 1213: retry the batch.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

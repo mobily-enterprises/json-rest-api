@@ -533,7 +533,13 @@ locking subquery locks every row it examines, and the gaps between them, so
 give the policy's subqueries an index that finds the deciding rows directly
 (the membership's workspace and user, the grant's user and project); a
 subquery over a whole table, such as a `scopedQuery` of a resource without
-ownership, locks all of its rows. With MariaDB's `innodb_snapshot_isolation`
+ownership, locks all of its rows. The rows a subquery examines are those its
+plan walks, not those it returns: a subquery that reads through another
+owner's table by a link (a module's definition by its id, say) and filters by
+the owner after the walk locks the rows of every owner its index range
+crosses. Write such a policy so each nested read uses an index that leads with
+the owner, or keep the walk out of the lock: lock the rows, then check the
+linked rows with a read of their own. With MariaDB's `innodb_snapshot_isolation`
 on, a deciding row written since the transaction's snapshot may fail the lock
 with errno 1020 (`ER_CHECKREAD`) rather than be read as committed, and on
 PostgreSQL at REPEATABLE READ or SERIALIZABLE a deciding row changed or
