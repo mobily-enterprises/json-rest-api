@@ -16,6 +16,7 @@ import {
 import { createStorageAdapter } from '../storage/storage-adapter.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 import { databaseFamily } from '../querying-writing/database-capabilities.js'
+import { lockConditionSubqueries } from './subquery-locks.js'
 
 const getScopeStorageAdapter = (scopes, scopeName) => scopes[scopeName]?.vars?.storageAdapter || null
 
@@ -193,7 +194,9 @@ export const applyScopeFiltersToIncludeQuery = async ({
 // One query and one row-policy run per linked type, however many ids are linked.
 // With `scoped: false`, the identifiers whose records exist, visible or not.
 // With `locked`, MySQL and MariaDB read them with a locking read, which sees
-// rows committed after the transaction's snapshot (see dataGetMinimal).
+// rows committed after the transaction's snapshot (see dataGetMinimal), and
+// the SELECTs the target's scope nests in it lock too, so its row policy
+// decides from the rows as last committed (see subquery-locks.js).
 export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, context, scoped = true, locked = false }) => {
   const idsByType = new Map()
   for (const { type, id } of identifiers) {
@@ -234,7 +237,10 @@ export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, cont
     const checks = transactionChecks(context.transaction)
     const checkScope = checks?.scopeOf(state.query, idPredicate, idColumn)
     const strength = lockedRead ? LOCK_STRENGTH.share : LOCK_STRENGTH.none
-    if (checkScope) {
+    // A check `locked` asks for reads the rows as last committed. Elsewhere it
+    // reads them plainly, which on PostgreSQL under READ COMMITTED sees them,
+    // and an answer remembered from an earlier plain check may not.
+    if (checkScope && (lockedRead || !locked)) {
       const known = checks.known(checkScope, ids, strength)
       if (known.size === ids.size) {
         for (const id of known) visibleIds.add(id)
@@ -242,7 +248,7 @@ export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, cont
       }
     }
     const started = checks?.started()
-    if (lockedRead) state.query.forShare()
+    if (lockedRead) lockConditionSubqueries(state.query.forShare(), knex)
     for (const row of await state.query) visibleIds.add(String(row[idColumn]))
     if (checkScope) checks.remember(checkScope, visibleIds, strength, started)
   }

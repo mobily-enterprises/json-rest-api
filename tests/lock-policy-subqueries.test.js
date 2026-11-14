@@ -370,7 +370,7 @@ describe(`Lock reads decide visibility from current rows (${storageMode.mode}, $
     }
   })
 
-  it('reads that do not lock keep their subqueries plain: query, get, a scoped query for a lock, and claim', async () => {
+  it('reads that do not lock keep their subqueries plain: query, get, a scoped query for a lock, and claim (its link check too)', async () => {
     for (const shape of POLICY_SHAPES) {
       await fixture.reset()
       const context = asUser('u1', shape)
@@ -381,9 +381,103 @@ describe(`Lock reads decide visibility from current rows (${storageMode.mode}, $
           const { query } = await fixture.projects.scopedQuery({ transaction, purpose: 'lock' }, context)
           assert.deepEqual((await query.select('id')).map(row => String(row.id)), ['1'])
           assert.deepEqual(ids(await fixture.projects.claim({ transaction, sort: ['id'] }, context)), ['1'])
+          // A claim never waits for a lock: the check of the claimed task's project link stays plain.
+          const [task] = (await fixture.tasks.claim({ transaction, sort: ['id'] }, context)).data
+          assert.equal(String(task.project?.id), '1', shape)
         })
       })
       assert.deepEqual(sql.filter(statement => SHARED_LOCK.test(statement)), [], shape)
+    }
+  })
+})
+
+describe(`A lock read checks its rows' links as last committed (${storageMode.mode}, ${databaseClient})`, { skip: tableOnly }, () => {
+  let fixture
+  before(async () => { fixture = await createLockPolicyFixture({ databaseOptions: { maxConnections: 5 } }) })
+  after(async () => { await fixture?.close() })
+
+  // Each locked task with its project link, as the lock answers it.
+  const links = document => document.data.map(task => [String(task.id), task.project?.id == null ? null : String(task.project.id)])
+  const lockers = {
+    lockByIds: (transaction, context) => fixture.tasks.lockByIds({ ids: ['1', '2'], missing: 'skip', transaction }, context),
+    lockWhere: (transaction, context) => fixture.tasks.lockWhere({ transaction }, context)
+  }
+  // What another transaction commits after u1's first plain read, with the links u1's lock of tasks must then answer
+  // (task 1 belongs to project 1, which u1 sees through a membership and a grant).
+  const CHANGES = {
+    'a project and its grant': {
+      write: async db => {
+        await db('lp_projects').insert({ id: 4, name: 'P4', workspace_id: 'ws-a' })
+        await db('lp_grants').insert({ id: 2, user_id: 'u1', project_id: 4 })
+        await db('lp_tasks').insert({ id: 2, name: 'T2', workspace_id: 'ws-a', project_id: 4 })
+      },
+      linked: [['1', '1'], ['2', '4']]
+    },
+    'the grant revoked': { write: db => db('lp_grants').where({ id: 1 }).del(), linked: [['1', null]] },
+    'the project moved to another workspace': { write: db => db('lp_projects').where({ id: 1 }).update({ workspace_id: 'ws-b' }), linked: [['1', null]] }
+  }
+  const readTasksPlainly = async (transaction, context) => links(await fixture.tasks.query({ transaction, queryParams: { sort: ['id'] } }, context))
+
+  for (const shape of POLICY_SHAPES) {
+    for (const [method, lock] of Object.entries(lockers)) {
+      for (const [change, { write, linked }] of Object.entries(CHANGES)) {
+        it(`${method}, ${shape} policy: ${change} after the transaction's first plain read`, { skip: !serverDatabase && 'needs a second connection' }, async () => {
+          await fixture.reset()
+          const context = asUser('u1', shape)
+          await fixture.api.transaction(async transaction => {
+            // On MySQL and MariaDB this read fixes the transaction's REPEATABLE READ snapshot.
+            assert.deepEqual(await readTasksPlainly(transaction, context), [['1', '1']])
+            await write(fixture.knex)
+            assert.deepEqual(links(await lock(transaction, context)), linked)
+          })
+        })
+      }
+    }
+  }
+
+  it('MySQL and MariaDB at READ COMMITTED, PostgreSQL at REPEATABLE READ: each answers the links as its isolation reads them', { skip: !serverDatabase && 'needs a second connection' }, async () => {
+    const { write, linked } = CHANGES['a project and its grant']
+    for (const [method, lock] of Object.entries(lockers)) {
+      await fixture.reset()
+      const context = asUser('u1')
+      const answer = await fixture.knex.transaction(async transaction => {
+        assert.deepEqual(await readTasksPlainly(transaction, context), [['1', '1']])
+        await write(fixture.knex)
+        return links(await lock(transaction, context))
+      }, { isolationLevel: isPostgres ? 'repeatable read' : 'read committed' })
+      // PostgreSQL's REPEATABLE READ reads, locking ones too, from the snapshot of its first statement: task 2 is not there yet.
+      assert.deepEqual(answer, isPostgres ? [['1', '1']] : linked, method)
+    }
+  })
+
+  it('on MySQL and MariaDB the link check takes a shared lock on the linked rows and on what their policy reads; elsewhere it stays plain', async () => {
+    for (const shape of POLICY_SHAPES) {
+      for (const [method, lock] of Object.entries(lockers)) {
+        await fixture.reset()
+        const { result, sql } = await fixture.measure(() => fixture.api.transaction(transaction => lock(transaction, asUser('u1', shape))))
+        assert.deepEqual(links(result), [['1', '1']], `${method}, ${shape}`)
+        const checks = sql.filter(statement => /^select distinct/i.test(statement) && statement.includes('lp_projects'))
+        assert.equal(checks.length, 1, `${method}, ${shape}: ${sql.join(' | ')}`)
+        assert.equal(sharedLocks(checks[0]), isMysql ? 1 + DECIDING_SELECTS[shape] : 0, `${method}, ${shape}: ${checks[0]}`)
+      }
+    }
+  })
+
+  it('a writer of a linked project waits until the lock read\'s transaction ends (MySQL and MariaDB)', { skip: !isMysql && 'the link check locks on MySQL and MariaDB only' }, async () => {
+    for (const [method, lock] of Object.entries(lockers)) {
+      await fixture.reset()
+      let writer
+      await fixture.api.transaction(async transaction => {
+        assert.deepEqual(links(await lock(transaction, asUser('u1'))), [['1', '1']])
+        let reportWriter
+        const writerId = new Promise(resolve => { reportWriter = resolve })
+        writer = fixture.knex.transaction(async other => {
+          reportWriter(await connectionId(other))
+          return other('lp_projects').where({ id: 1 }).update({ name: 'P1 renamed' })
+        })
+        await waitForLockWait(fixture.knex, await writerId, writer)
+      })
+      assert.equal(await writer, 1, method)
     }
   })
 })

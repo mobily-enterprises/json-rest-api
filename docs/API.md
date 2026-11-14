@@ -1391,7 +1391,10 @@ row policy's `whereExists` or `whereIn`, a filter's) takes a shared lock,
 `FOR SHARE` on PostgreSQL and `LOCK IN SHARE MODE` on MySQL and MariaDB,
 whatever `lockMode`: the lock decides from those rows as last committed rather
 than from the transaction's snapshot, waits for a transaction changing them,
-and keeps them unchanged until commit. `claim` keeps its subqueries plain. On SQLite,
+and keeps them unchanged until commit. The locked rows' to-one links are then
+checked as last committed too: a shared-lock read on MySQL and MariaDB, a plain
+read on PostgreSQL, never an earlier check reused. `claim` keeps its subqueries
+and its link checks plain. On SQLite,
 which has one writer, they take the database's write lock with a write that
 changes nothing, then read.
 

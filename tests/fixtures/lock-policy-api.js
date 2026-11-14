@@ -8,8 +8,9 @@ import { useStoragePlugin } from './api-configs.js'
 // decides visibility: a membership of the project's workspace (lp_members) and
 // a grant of the project itself (lp_grants). The policy writes its two
 // subqueries in the shape the context's policyShape names, one for each way
-// Knex takes a subquery a policy writes.
-export const LOCK_POLICY_TABLES = ['lp_grants', 'lp_members', 'lp_projects']
+// Knex takes a subquery a policy writes. Tasks (lp_tasks) belong to projects,
+// so a lock read of tasks checks each task's project link through that policy.
+export const LOCK_POLICY_TABLES = ['lp_tasks', 'lp_grants', 'lp_members', 'lp_projects']
 
 /**
  * - callback: whereExists and whereIn callbacks;
@@ -105,7 +106,20 @@ export async function createLockPolicyApi (knex) {
     indexes: [{ columns: ['workspace_id', 'name'] }],
     tableName: 'lp_projects'
   })
-  for (const resource of ['lp_members', 'lp_grants', 'lp_projects']) await api.resources[resource].createKnexTable()
+  // A task's project is visible to the caller through the projects' policy: a
+  // lock read of tasks checks each task's project link with it.
+  await api.addResource('lp_tasks', {
+    schema: {
+      id: { type: 'id' },
+      name: { type: 'string', required: true, max: 40, search: true },
+      workspace_id: { type: 'string', required: true, max: 40 },
+      project_id: { type: 'id', nullable: true, belongsTo: 'lp_projects', as: 'project' }
+    },
+    autofilter: 'workspace',
+    indexes: [{ columns: ['workspace_id', 'name'] }],
+    tableName: 'lp_tasks'
+  })
+  for (const resource of ['lp_members', 'lp_grants', 'lp_projects', 'lp_tasks']) await api.resources[resource].createKnexTable()
   return api
 }
 
@@ -122,11 +136,14 @@ export async function createLockPolicyFixture ({ databaseOptions } = {}) {
       api,
       knex,
       projects: api.resources.lp_projects,
+      tasks: api.resources.lp_tasks,
       async reset ({ grants = [] } = {}) {
         await cleanTables(knex, LOCK_POLICY_TABLES, { storage: 'knex' })
         await knex('lp_projects').insert([1, 2, 3].map(id => ({ id, name: `P${id}`, workspace_id: 'ws-a' })))
         await knex('lp_members').insert([{ id: 1, workspace_id: 'ws-a', user_id: 'u1' }, { id: 2, workspace_id: 'ws-a', user_id: 'u2' }])
         await knex('lp_grants').insert([{ id: 1, user_id: 'u1', project_id: 1 }, ...grants])
+        // Task 1 belongs to project 1, which u1 sees.
+        await knex('lp_tasks').insert({ id: 1, name: 'T1', workspace_id: 'ws-a', project_id: 1 })
       },
       // Statements the work runs, from the driver's query events.
       async measure (work) {

@@ -327,15 +327,24 @@ they too lock in one order. Hidden or missing ids throw
 locked rows show the latest committed values even when the transaction began
 earlier.
 
-The lock covers the locked rows only. Their to-one links are checked for
-visibility afterwards with a plain read of the linked tables, as for `query`.
-On MySQL and MariaDB that read uses the transaction's snapshot, which starts at
-its first plain read: when that came before the lock (see above), a target that
-another transaction committed, hid or deleted since then reads as it was, so a
-link to a target committed since shows as `null`. The link values themselves
-are the locked rows' latest. Locking the targets as well would block other
-transactions' inserts of rows that reference them; when the transaction
-depends on a target, lock it with its own `lockByIds`.
+The lock covers the locked rows; their to-one links are checked for
+visibility afterwards, one read per linked table, as for `query`. In
+`lockByIds` and `lockWhere` that check sees the targets as last committed, as
+the lock sees its rows. On MySQL and MariaDB it is a shared-lock read
+(`LOCK IN SHARE MODE`, with the subqueries of the target's row policy locked
+too, [below](#a-locks-row-policy-reads-current-rows)): a plain read there
+answers from the transaction's snapshot, which starts at its first plain read,
+so when that came before the lock (see above) a target another transaction
+committed, hid or deleted since would read as it was, and a link to a target
+committed since would show as `null`. The shared lock lets other transactions
+read the targets and insert rows that reference them, and makes a
+transaction that changes one wait until this one ends. On PostgreSQL the check
+stays a plain read, which under READ COMMITTED sees the targets committed when
+it starts. On every database it reads again rather than reusing an earlier
+check of the same targets in the transaction. `claim`, which never waits for a
+lock, checks its links with a plain read. The link values themselves are the
+locked rows' latest. When the transaction changes a target, lock it with its
+own `lockByIds`.
 
 On MySQL and MariaDB, InnoDB locks each listed primary-key row before it
 evaluates the ownership and row-policy predicates, and under REPEATABLE READ

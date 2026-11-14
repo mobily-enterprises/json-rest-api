@@ -89,7 +89,11 @@ export async function queryAllMethod ({ params, context, vars, scopes, scopeName
 // data call, so masking and denials apply to them too: checkDataPermissions for
 // each row as `get` runs it, enrichRecord, computed fields, the finish hooks,
 // sparse fieldsets and the plain format. Hooks see method 'query' and lock: true.
-async function finishLockedRead ({ document, context, scope, scopes, scopeName, runHooks, hasHooks, hookNames }) {
+// `lockedLinks` (lockByIds and lockWhere): the rows' to-one links are checked
+// with a locking read too, as the rows were read, so a target committed after
+// the transaction's first plain read is seen (see filterToOneResponseLinkage).
+// A claim never waits for a lock, so its link check stays a plain read.
+async function finishLockedRead ({ document, context, scope, scopes, scopeName, runHooks, hasHooks, hookNames, lockedLinks = false }) {
   context.method = 'query'
   context.lock = true
   context.record = normalizeRecordAttributes(document, scopes)
@@ -116,7 +120,7 @@ async function finishLockedRead ({ document, context, scope, scopes, scopeName, 
   }
   await runHooks('finish')
   await runHooks('finishQuery')
-  await filterToOneResponseLinkage(context, scopes, hookNames)
+  await filterToOneResponseLinkage(context, scopes, hookNames, { locked: lockedLinks })
   const record = normalizeRecordAttributes(context.record, scopes, { source: 'response' })
   filterResponseFields(record, context.queryParams.fields)
   if (context.format !== 'plain') return { data: record.data }
@@ -184,7 +188,7 @@ export async function lockByIdsMethod (args) {
     throw new RestApiRecordsNotFoundError({ resourceType: scopeName, missing: ids.length - document.data.length })
   }
   if (!document.data.length) return { data: [] }
-  return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks, hookNames })
+  return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks, hookNames, lockedLinks: true })
 }
 
 /**
@@ -237,7 +241,7 @@ export async function lockWhereMethod (args) {
   if (limit === undefined && document.data.length > MAX_LOCK_WHERE) {
     throw new RestApiRowLimitError({ resourceType: scopeName, rowLimit: MAX_LOCK_WHERE, operation: 'lockWhere' })
   }
-  return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks, hookNames })
+  return finishLockedRead({ document, context, scope, scopes, scopeName, runHooks, hasHooks, hookNames, lockedLinks: true })
 }
 
 /**

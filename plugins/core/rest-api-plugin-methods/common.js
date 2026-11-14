@@ -764,11 +764,17 @@ function linkNeedsNoRead ({ context, scopes, hookNames, sourceType, relationship
 /**
  * Sets to null the to-one links of the response whose target the caller cannot
  * see or that no longer exists, with one read per linked type.
+ * `locked`: the records were read by a lock read, which sees the latest rows
+ * whatever snapshot the transaction's plain reads keep, so their targets are
+ * read with a lock too (see filterVisibleIdentifiers): a plain read on MySQL
+ * and MariaDB under REPEATABLE READ would miss a target committed after the
+ * transaction's first plain read and answer the locked row's link as null.
  * @param {ResourceContext} context
  * @param {Record<string, LifecycleResource>} scopes
  * @param {(event: string, scope: LifecycleResource) => string[]} hookNames
+ * @param {{ locked?: boolean }} [options]
  */
-export const filterToOneResponseLinkage = async (context, scopes, hookNames) => {
+export const filterToOneResponseLinkage = async (context, scopes, hookNames, { locked = false } = {}) => {
   const document = context.record
   const resources = [document?.data, document?.included].flat().filter(resource => resource != null)
   const linkages = []
@@ -791,7 +797,7 @@ export const filterToOneResponseLinkage = async (context, scopes, hookNames) => 
   const unchecked = linkages.filter(relationship => !included.has(key(/** @type {Identifier} */ (relationship.data))))
   if (unchecked.length === 0) return
   const visible = new Set(await filterVisibleIdentifiers({
-    identifiers: unchecked.map(relationship => relationship.data), scopes, knex: context.db, context
+    identifiers: unchecked.map(relationship => relationship.data), scopes, knex: context.db, context, locked
   }))
   for (const relationship of unchecked) {
     if (!visible.has(relationship.data)) relationship.data = null
