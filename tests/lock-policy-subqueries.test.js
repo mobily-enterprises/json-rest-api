@@ -83,6 +83,35 @@ describe('A lock read\'s condition subqueries take a shared lock (compiled)', ()
       assert.equal(count(sql), 7, sql)
     })
 
+    it(`${family}: the SELECTs in a join's ON clause take ${share}: onExists, a subquery onIn, one inside a parenthesised group and a raw clause's bound subquery`, () => {
+      const policy = db => db('grants').select(1)
+        .join('members', function () {
+          this.on('members.user_id', '=', 'grants.user_id')
+            .andOnExists(function () { this.select(1).from('bans').whereColumn('bans.member_id', 'members.id') })
+            .andOnIn('members.team_id', db('teams').select('id').where('active', true))
+            .andOn(function () { this.on('members.project_id', '=', 'grants.project_id').orOnExists(db('owners').select(1).whereColumn('owners.member_id', 'members.id')) })
+            .andOn(db.raw('exists ?', [db('audits').select(1).whereColumn('audits.member_id', 'members.id')]))
+        })
+        .whereColumn('grants.project_id', 'projects.id')
+      const plain = policy(compilers[family])
+      const before = plain.toSQL().sql
+      const sql = compiled(family, db => db('projects').whereExists(plain))
+      // grants with its join; bans; teams; owners; audits.
+      assert.equal(count(sql), 5, sql)
+      // The policy's own builder is copied, never changed.
+      assert.equal(plain.toSQL().sql, before)
+      assert.equal(count(before), 0, before)
+    })
+
+    it(`${family}: an ON clause's subquery takes ${share} in an outer join too, which on PostgreSQL leaves the joining SELECT itself plain`, () => {
+      const sql = compiled(family, db => db('projects').whereIn('projects.id', db('grants').select('grants.project_id')
+        .leftJoin('members', function () {
+          this.on('members.user_id', '=', 'grants.user_id').andOnExists(function () { this.select(1).from('bans').whereColumn('bans.member_id', 'members.id') })
+        })
+        .whereNotNull('members.id')))
+      assert.equal(count(sql), family === 'pg' ? 1 : 2, sql)
+    })
+
     it(`${family}: a subquery's own lock clause stays, and a subquery written as raw SQL text stays as written`, () => {
       const sql = compiled(family, db => db('projects')
         .whereIn('projects.id', db('grants').select('project_id').forUpdate())
@@ -343,6 +372,20 @@ describe(`Lock reads decide visibility from current rows (${storageMode.mode}, $
       'group by': (q, db) => q.whereIn('lp_projects.id', db('lp_grants').select('project_id').groupBy('project_id').having(db.raw('count(*) >= 1'))),
       aggregate: (q, db) => q.where(db.raw('0 < ?', [db('lp_grants').count('*').whereColumn('lp_grants.project_id', 'lp_projects.id')])),
       'left join': (q, db) => q.whereIn('lp_projects.id', db('lp_grants').select('lp_grants.project_id').leftJoin('lp_members', 'lp_members.user_id', 'lp_grants.user_id').where('lp_grants.user_id', 'u1')),
+      'on clause': (q, db) => q.whereExists(db('lp_grants').select(1)
+        .join('lp_projects as granted', function () {
+          this.on('granted.id', '=', 'lp_grants.project_id').andOnExists(function () {
+            this.select(1).from('lp_members').whereColumn('lp_members.workspace_id', 'granted.workspace_id').where('lp_members.user_id', 'u1')
+          })
+        })
+        .whereColumn('lp_grants.project_id', 'lp_projects.id').where('lp_grants.user_id', 'u1')),
+      'left join on clause': (q, db) => q.whereIn('lp_projects.id', db('lp_grants').select('lp_grants.project_id')
+        .leftJoin('lp_members', function () {
+          this.on('lp_members.user_id', '=', 'lp_grants.user_id').andOnExists(function () {
+            this.select(1).from('lp_projects as member_project').whereColumn('member_project.workspace_id', 'lp_members.workspace_id')
+          })
+        })
+        .where('lp_grants.user_id', 'u1').whereNotNull('lp_members.id')),
       union: (q, db) => q.whereIn('lp_projects.id', db('lp_grants').select('project_id').where('user_id', 'u1').union(db('lp_grants').select('project_id').where('user_id', 'u2')))
     }
     for (const [shape, add] of Object.entries(shapes)) {

@@ -6,7 +6,8 @@
 // MariaDB under REPEATABLE READ it answers from the transaction's snapshot,
 // fixed at its first plain read, so the lock would decide visibility from
 // membership or grant rows as they were then. So every such SELECT, at any
-// depth, takes FOR SHARE (LOCK IN SHARE MODE on MySQL and MariaDB): a locking
+// depth (in a join's ON clause too), takes FOR SHARE (LOCK IN SHARE MODE on
+// MySQL and MariaDB): a locking
 // read of the rows the decision reads, which reads them as last committed,
 // waits for a transaction that is changing them, and keeps them unchanged
 // until the transaction ends. Shared, not exclusive: two lock reads that read
@@ -75,8 +76,8 @@ function lockSelect (builder, family) {
 
 /**
  * Replaces each condition statement of `builder` (owned by this module or the
- * lock read) that holds a SELECT with a copy that locks it; join and common
- * table expression sources likewise.
+ * lock read) that holds a SELECT with a copy that locks it; join sources, the
+ * SELECTs in a join's ON clause and common table expressions likewise.
  * @param {any} builder @param {string} family
  */
 function lockNested (builder, family) {
@@ -85,12 +86,49 @@ function lockNested (builder, family) {
     const statement = statements[index]
     if (statement.grouping === 'where') {
       statements[index] = lockedCondition(statement, family)
-    } else if (statement.grouping === 'join' && isBuilder(statement.table)) {
-      statements[index] = Object.assign(Object.create(Object.getPrototypeOf(statement)), statement, { table: lockedCopy(statement.table, family) })
+    } else if (statement.grouping === 'join') {
+      const table = isBuilder(statement.table) ? lockedCopy(statement.table, family) : statement.table
+      const clauses = lockedClauses(statement.clauses, family)
+      if (table !== statement.table || clauses !== statement.clauses) {
+        statements[index] = Object.assign(Object.create(Object.getPrototypeOf(statement)), statement, { table, clauses })
+      }
     } else if (statement.grouping === 'with') {
       statements[index] = { ...statement, value: lockedValue(statement.value, family) }
     }
   }
+}
+
+/**
+ * A join's ON clauses with their SELECTs locked (onExists, a subquery in onIn
+ * or a comparison, a raw clause's bound builders), at any depth of
+ * parenthesised groups; the clauses themselves when they hold none.
+ * @param {any[] | undefined} clauses @param {string} family
+ * @returns {any[] | undefined}
+ */
+function lockedClauses (clauses, family) {
+  if (!Array.isArray(clauses)) return clauses
+  const locked = clauses.map(clause => lockedClause(clause, family))
+  return locked.some((clause, index) => clause !== clauses[index]) ? locked : clauses
+}
+
+/** @param {any} clause @param {string} family */
+function lockedClause (clause, family) {
+  const { value } = clause
+  if (clause.type === 'onWrapped' && typeof value === 'function') {
+    // A parenthesised group: Knex calls it on a join clause of its own at
+    // compile time, whose clauses then take the lock.
+    return {
+      ...clause,
+      /** @this {any} */
+      value: function lockedOnGroup (/** @type {unknown[]} */ ...args) {
+        const result = value.apply(this, args)
+        this.clauses = lockedClauses(this.clauses, family)
+        return result
+      }
+    }
+  }
+  const locked = lockedValue(value, family)
+  return locked === value ? clause : { ...clause, value: locked }
 }
 
 /**

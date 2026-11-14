@@ -18,12 +18,15 @@ export const LOCK_POLICY_TABLES = ['lp_tasks', 'lp_grants', 'lp_members', 'lp_pr
  * - group: one parenthesised group over read-only builders, as a policy
  *   composer that groups each policy writes it;
  * - scoped: whereExists over other resources' scoped rows, read-only derived
- *   tables under an alias.
+ *   tables under an alias;
+ * - on clause: one whereExists whose membership check sits in a join's ON
+ *   clause (the granted project joins only when the user is a member of its
+ *   workspace).
  */
-export const POLICY_SHAPES = Object.freeze(['callback', 'builder', 'group', 'scoped'])
+export const POLICY_SHAPES = Object.freeze(['callback', 'builder', 'group', 'scoped', 'on clause'])
 
 /** The SELECTs each shape nests in a lock read: a scoped source is two, the derived table and the read of it. */
-export const DECIDING_SELECTS = Object.freeze({ callback: 2, builder: 2, group: 2, scoped: 4 })
+export const DECIDING_SELECTS = Object.freeze({ callback: 2, builder: 2, group: 2, scoped: 4, 'on clause': 2 })
 
 export const asUser = (userId, policyShape = 'callback') => ({ scopeValues: { workspaceId: 'ws-a' }, userId, policyShape })
 
@@ -60,6 +63,17 @@ async function membershipAndGrant ({ query, context, db, column, system, api }) 
       query.whereExists(grants.select(1).whereColumn('g.project_id', project).where('g.user_id', user))
       return true
     }
+    case 'on clause':
+      query.whereExists(function () {
+        this.select(1).from('lp_grants')
+          .join('lp_projects as granted', function () {
+            this.on('granted.id', '=', 'lp_grants.project_id').andOnExists(function () {
+              this.select(1).from('lp_members').whereColumn('lp_members.workspace_id', 'granted.workspace_id').where('lp_members.user_id', user)
+            })
+          })
+          .whereColumn('lp_grants.project_id', project).where('lp_grants.user_id', user)
+      })
+      return true
     default:
       throw new Error(`Unknown policy shape '${context.policyShape}'`)
   }

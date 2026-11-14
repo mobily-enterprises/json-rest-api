@@ -1387,7 +1387,8 @@ index must read the rows in that order, and throws
 other transaction holds (`SKIP LOCKED`), in `sort` order (stored fields, default
 `['id']`). A row policy that joins tables is refused for all three. In
 `lockByIds` and `lockWhere`, every SELECT nested in the read's conditions (a
-row policy's `whereExists` or `whereIn`, a filter's) takes a shared lock,
+row policy's `whereExists` or `whereIn`, a filter's, and those in a joining
+subquery's join conditions) takes a shared lock,
 `FOR SHARE` on PostgreSQL and `LOCK IN SHARE MODE` on MySQL and MariaDB,
 whatever `lockMode`: the lock decides from those rows as last committed rather
 than from the transaction's snapshot, waits for a transaction changing them,

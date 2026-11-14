@@ -476,7 +476,10 @@ MySQL and MariaDB, whatever the lock's `lockMode`. That covers the row policy's
 subqueries at any depth, written as callbacks, over builders, over read-only
 builders, inside a `where` group, or over another resource's `scopedQuery`
 (the derived table and the read of it), and any subquery a filter or another
-`knexQueryFiltering` hook adds. Existing policies need no change.
+`knexQueryFiltering` hook adds, and the SELECTs in the join conditions of a
+subquery that joins (`onExists`, an `onIn` over a subquery, one inside an `on`
+group, a raw clause's bound subquery) and its joined derived tables. Existing
+policies need no change.
 
 ```js
 // The policy is unchanged. In a lock its subquery takes FOR SHARE (LOCK IN SHARE MODE on MySQL and MariaDB).
