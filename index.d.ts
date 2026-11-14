@@ -36,7 +36,7 @@ export function createSystemContext<Values extends Record<string, unknown> = Rec
   reason: string, values?: Values
 ): Values & { system: true; systemReason: string }
 export function isSystemContext(context: unknown): boolean
-export function readOnlyQueryBuilder<Builder extends import('knex').Knex.QueryBuilder>(builder: Builder, options?: { resourceType?: string }): Builder
+export function readOnlyQueryBuilder<Builder extends import('knex').Knex.QueryBuilder>(builder: Builder, options?: { resourceType?: string }): import('./types/data-access-methods.js').ReadOnlyView<Builder>
 
 export function getUrlPrefix(
   context?: { urlPrefixOverride?: string; urlPrefix?: string } | null,

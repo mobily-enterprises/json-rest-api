@@ -1,7 +1,7 @@
 import {
   JsonRestApi, RestApiError, RestApiPlugin, RestApiKnexPlugin, AutoFilterPlugin, FastifyPlugin,
   LocalStorage, RestApiWriteError, RestApiVersionConflictError,
-  getUrlPrefix, REST_API_INCLUDE_ERROR_CODE, AnyapiRegistry, ensureAnyApiSchema
+  getUrlPrefix, REST_API_INCLUDE_ERROR_CODE, AnyapiRegistry, ensureAnyApiSchema, readOnlyQueryBuilder
 } from 'json-rest-api'
 import type {
   ResourceCoreMethods, TransactionMethods, RestApiPluginOptions,
@@ -49,6 +49,10 @@ const tenantOptions = {
   schemaCheckInterval: 5000,
   onSchemaChanged: (change: AnyapiSchemaChange) => { void change.version }
 } satisfies RestApiAnyapiKnexPluginOptions
+// A read-only view takes index hints by name and stays a builder.
+void readOnlyQueryBuilder(knex('books')).forceIndex('books_title_index', 'PRIMARY').select('title')
+// @ts-expect-error forceIndex takes at least one index name.
+void readOnlyQueryBuilder(knex('books')).forceIndex()
 const version: number | null = await registry.getSchemaVersion('account_1', 'books')
 await registry.retireFields({ tenant: 'account_1', resource: 'books', fields: ['isbn'] })
 const totals = await books.aggregate({

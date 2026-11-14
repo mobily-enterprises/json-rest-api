@@ -228,7 +228,8 @@ guards against mistakes, not hostile code: code that means to bypass it can use
 Knex directly. A table you join is not scoped by the builder; join only what
 the caller may see, or scope it with its own `scopedQuery`.
 `readOnlyQueryBuilder(builder, { resourceType })` is exported for builders your
-own code produces.
+own code produces. On MySQL and MariaDB both builders take `forceIndex(...names)`
+for the table they read (see the lock section below).
 
 ## queryAll
 
@@ -537,9 +538,17 @@ ownership, locks all of its rows. The rows a subquery examines are those its
 plan walks, not those it returns: a subquery that reads through another
 owner's table by a link (a module's definition by its id, say) and filters by
 the owner after the walk locks the rows of every owner its index range
-crosses. Write such a policy so each nested read uses an index that leads with
-the owner, or keep the walk out of the lock: lock the rows, then check the
-linked rows with a read of their own. With MariaDB's `innodb_snapshot_isolation`
+crosses, and the planner may scan a nested table whole when the caller's owner
+holds most of its rows. Write such a policy so each nested read uses an index
+that leads with the owner, or keep the walk out of the lock: lock the rows,
+then check the linked rows with a read of their own. On MySQL and MariaDB a
+read-only builder (a `scopedQuery`, or `readOnlyQueryBuilder`'s) can name that
+index itself: `forceIndex(...names)` makes the table it reads, inside its
+derived table for a `scopedQuery`, use the named indexes, so the nested read
+examines only the owner's range, as in
+`query.whereIn(column('id'), paths.forceIndex('idx_paths_workspace').select('p.unit_id'))`.
+It takes plain index names only and sets the hint once; PostgreSQL and SQLite
+have no index hints, and there it throws a `TypeError`. With MariaDB's `innodb_snapshot_isolation`
 on, a deciding row written since the transaction's snapshot may fail the lock
 with errno 1020 (`ER_CHECKREAD`) rather than be read as committed, and on
 PostgreSQL at REPEATABLE READ or SERIALIZABLE a deciding row changed or

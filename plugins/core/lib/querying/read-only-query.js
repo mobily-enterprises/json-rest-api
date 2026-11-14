@@ -1,5 +1,6 @@
 // @ts-check
 import { RestApiScopedQueryReadOnlyError } from '../../../../lib/rest-api-errors.js'
+import { databaseFamily } from '../querying-writing/database-capabilities.js'
 
 // Calls that write, lock, change the source table, clear its predicates, or
 // add rows from outside the scope (common table expressions and set operations).
@@ -56,6 +57,65 @@ const stateCopy = value => {
   return value && typeof value === 'object' ? { ...value } : value
 }
 
+// An index name forceIndex takes: a plain identifier, so a name adds no SQL and
+// names no table.
+const INDEX_NAME = /^[A-Za-z_][A-Za-z0-9_$]{0,63}$/
+
+/** @param {unknown} value */
+const isTableName = value => typeof value === 'string' ||
+  (value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype)
+
+/**
+ * The plain builder behind a view, through views of views; any other builder as it is.
+ * @param {any} builder
+ */
+const plainOf = builder => {
+  let plain = builder
+  for (let viewed = viewedBuilders.get(plain); viewed; viewed = viewedBuilders.get(plain)) plain = viewed
+  return plain
+}
+
+/**
+ * A FROM source with FORCE INDEX on the table it reads: a table name's own,
+ * or, for a derived table (a scoped query or a join source reads its
+ * resource's rows as one), that table's FROM at any depth. A builder it
+ * reaches is copied, never changed: a clone of a view shares its derived
+ * table. Undefined when the source reads no table by name (raw SQL, or an
+ * index hint already set).
+ * @param {any} source @param {string[]} names @param {any} client @param {string} resourceType
+ * @returns {unknown}
+ */
+function forcedSource (source, names, client, resourceType) {
+  if (isTableName(source)) return client.raw(`?? force index (${names.map(() => '??').join(', ')})`, [source, ...names])
+  if (!isQueryBuilder(source)) return undefined
+  const plain = plainOf(source)
+  const table = forcedSource(plain._single.table, names, client, resourceType)
+  if (table === undefined) return undefined
+  const copy = plain.clone()
+  copy._single = { ...copy._single, table }
+  return plain === source ? copy : readOnlyQueryBuilder(copy, { resourceType })
+}
+
+/**
+ * Sets FORCE INDEX on the table a view's builder reads (see forcedSource), so
+ * a locking read that nests the view examines only that index's rows.
+ * @param {any} builder the view's own builder @param {unknown[]} names @param {string} resourceType
+ */
+function forceIndex (builder, names, resourceType) {
+  const family = databaseFamily(builder)
+  if (family !== 'mysql') {
+    throw new TypeError(`forceIndex is MySQL and MariaDB only: ${family === 'pg' ? 'PostgreSQL' : 'SQLite'} has no index hints, and its planner picks the index`)
+  }
+  if (!names.length || !names.every(name => typeof name === 'string' && INDEX_NAME.test(name))) {
+    throw new TypeError('forceIndex takes one or more index names, each a plain identifier: letters, digits, _ and $, at most 64, starting with a letter or _')
+  }
+  const table = forcedSource(builder._single.table, /** @type {string[]} */ (names), builder.client, resourceType)
+  if (table === undefined) {
+    throw new TypeError(`forceIndex on '${resourceType}' needs a view that reads a table by name, or a derived table that does, and takes every index in one call`)
+  }
+  builder._single = { ...builder._single, table }
+}
+
 /**
  * A SELECT-only view of a Knex query builder. Reads, joins, subqueries and
  * execution work as usual; writes, row locks, set operations, common table
@@ -63,6 +123,12 @@ const stateCopy = value => {
  * access to the Knex client throw RestApiScopedQueryReadOnlyError. Builders it
  * returns, including clones, are read-only too. It guards against mistakes, not
  * hostile code: code that means to bypass it can use Knex directly.
+ *
+ * On MySQL and MariaDB, `forceIndex(...names)` makes the table the view reads
+ * use those indexes (FORCE INDEX), so a locking read that nests the view locks
+ * only the rows that index reaches; on a view over a derived table, it hints
+ * the table inside. It takes plain index names only, sets the hint once, and
+ * throws a TypeError elsewhere.
  * @template {object} Builder
  * @param {Builder} builder
  * @param {{ resourceType?: string }} [options]
@@ -76,6 +142,12 @@ export function readOnlyQueryBuilder (builder, { resourceType = 'query' } = {}) 
   const proxy = new Proxy(builder, {
     get (target, property, receiver) {
       if (typeof property === 'string' && FORBIDDEN_METHODS.has(property)) return () => refuse(property)
+      if (property === 'forceIndex') {
+        return (/** @type {unknown[]} */ ...names) => {
+          forceIndex(plainOf(target), names, resourceType)
+          return receiver
+        }
+      }
       if (property === 'client' && !insideBuilderMethod) refuse('client')
       const value = Reflect.get(target, property, receiver)
       if ((property === '_single' || property === '_statements') && !insideBuilderMethod) return stateCopy(value)

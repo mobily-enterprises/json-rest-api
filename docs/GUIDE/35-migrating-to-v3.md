@@ -502,6 +502,17 @@ lock's link check on MySQL and MariaDB now holds the targets shared until
 commit, so a transaction that changes a target waits for it. Same-key races
 still fail with 23505 or 1213: retry the batch.
 
+## Index hints on read-only builders (3.2.0)
+
+| 3.1.11 | 3.2.0 |
+| --- | --- |
+| a SELECT nested in a lock read's conditions took a shared lock on every row its plan examined, and a policy could not name the index for it: the read-only builder refuses `from`, so a scan of a shared table locked other owners' rows | on MySQL and MariaDB a read-only builder (a `scopedQuery`, or `readOnlyQueryBuilder`'s) takes `forceIndex(...names)`, which makes the table it reads, inside the derived table for a `scopedQuery`, use the named indexes |
+
+Upgrading: nothing changes until a policy calls `forceIndex`. It takes plain
+index names only, sets the hint once, and throws a `TypeError` on PostgreSQL
+and SQLite; a policy shared across databases calls it only on MySQL and
+MariaDB. A name no index has fails the read there (MySQL errno 1176).
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

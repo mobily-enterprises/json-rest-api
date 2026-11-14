@@ -1294,6 +1294,15 @@ common table expressions and access to its Knex client, on clones too
 (`RestApiScopedQueryReadOnlyError`); joined tables are not scoped. It guards
 against mistakes, not hostile code.
 
+On MySQL and MariaDB, `query.forceIndex(...names)` makes the resource's table
+inside the derived table read through the named indexes (`FORCE INDEX`), so a
+lock read that nests the builder in its conditions locks only the rows that
+index reaches. Every builder `readOnlyQueryBuilder` returns has it, and on a
+builder over a table it hints that table. It takes plain index names
+(letters, digits, `_` and `$`, at most 64), sets the hint once, changes no
+clone or builder it reads from, and throws a `TypeError` on PostgreSQL and
+SQLite, which have no index hints.
+
 ### queryAll - Every Matching Record
 
 ```javascript

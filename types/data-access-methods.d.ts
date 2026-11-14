@@ -75,7 +75,13 @@ export interface ScopedQueryParams {
 }
 // A Knex builder over a derived table of the scoped rows. It refuses writes, locks,
 // table changes, set operations, common table expressions and access to the client.
-export type ReadOnlyQueryBuilder = Knex.QueryBuilder
+export type ReadOnlyQueryBuilder = ReadOnlyView<Knex.QueryBuilder>
+// A read-only view of a builder (readOnlyQueryBuilder). On MySQL and MariaDB, forceIndex makes the
+// table it reads (the resource's table inside a derived one) use the named indexes; it takes plain
+// index names, sets the hint once, and throws on PostgreSQL and SQLite.
+export type ReadOnlyView<Builder extends Knex.QueryBuilder> = Builder & {
+  forceIndex(...names: [string, ...string[]]): ReadOnlyView<Builder>
+}
 
 export interface DataAccessMethods<
   Fields extends object = Record<string, unknown>,
