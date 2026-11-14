@@ -80,8 +80,8 @@ export async function createDataAccessApi (knex, { storage = storageMode.mode, e
     relationships: {
       labels: { type: 'manyToMany', target: 'da_labels', through: 'da_entry_labels', foreignKey: 'entry_id', otherKey: 'label_id' }
     },
-    // A filter on another table's field.
-    searchSchema: { accountName: { type: 'string', actualField: 'da_accounts.name' } },
+    // A filter on another table's field, and one that matches a list of codes.
+    searchSchema: { accountName: { type: 'string', actualField: 'da_accounts.name' }, codes: { type: 'array', actualField: 'code', filterOperator: 'in' } },
     autofilter: 'workspace',
     rowPolicy: 'groupVisibility',
     ...(storage === 'anyapi' ? {} : { lockVersionField: 'lock_version' }),

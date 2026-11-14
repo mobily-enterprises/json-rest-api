@@ -407,8 +407,9 @@ compare is preferred. Invisible (MySQL) and ignored (MariaDB) indexes cannot be
 forced and do not count. With `sort` or `limit`, InnoDB also locks the rows in
 the order it reads them, and a sort it cannot read from the index would lock
 every match before it sorts, so the index must read them in that order: after
-the columns the read fixes to one value (the ownership columns, and the
-filters' single-value equalities), it holds the sort's columns, each whole and
+the columns the read fixes to one value (the ownership columns, the filters'
+single-value equalities, and list filters given one value, which read that
+value's rows in index order as an equality does), it holds the sort's columns, each whole and
 ascending, and then the id or nothing (InnoDB ends every secondary index with
 the primary key), and the sort's fields go one way, as InnoDB reads an index
 forward or backward. Among those, the index that fixes most columns is used. A

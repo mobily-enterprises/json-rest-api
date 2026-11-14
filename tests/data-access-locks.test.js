@@ -364,6 +364,11 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
     for (const limit of [2, undefined]) {
       await assert.rejects(fixture.api.transaction(transaction => fixture.api.resources.da_entries.lockWhere({ filters: { amount: 10 }, limit, after: '1', transaction }, workspaceA())), isA(RestApiBulkWriteUnsupportedError), String(limit))
     }
+    // A list filter given one value fixes its column as an equality does, so the (workspace_id, code) index reads
+    // that code's rows in id order; given two values it fixes none.
+    const byCodes = codes => fixture.api.transaction(transaction => fixture.api.resources.da_entries.lockWhere({ filters: { codes }, limit: 2, after: '1', transaction }, workspaceA()))
+    assert.deepEqual((await byCodes(['E2'])).data.map(record => record.code), ['E2'])
+    await assert.rejects(byCodes(['E2', 'E3']), isA(RestApiBulkWriteUnsupportedError))
   })
 
   it('lockWhere with after locks the rows committed since the transaction first read', { skip: !serverDatabase && 'needs a second connection' }, async () => {

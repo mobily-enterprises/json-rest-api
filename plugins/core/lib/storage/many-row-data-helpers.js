@@ -755,8 +755,9 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
    * InnoDB also locks rows in the order it reads them, and a sort it cannot
    * read from the index would lock every match first. So a read with an
    * `order` (a sort or a limit) takes an index that reads in that order: after
-   * the columns the read fixes to one value (the ownership columns and the
-   * filters' single-value equalities), its columns are the order's, in one
+   * the columns the read fixes to one value (the ownership columns, the
+   * filters' single-value equalities and list filters given one value), its
+   * columns are the order's, in one
    * direction, the id last or left to the primary key InnoDB ends every
    * secondary index with.
    * Returns the index's name and, for an `order`, the ORDER BY that reads it
@@ -772,8 +773,14 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const simple = definition => definition && !definition.oneOf && !definition.applyFilter && !definition.polymorphicField && !definition.actualField?.includes('.')
     const columnOf = key => storageAdapter.translateColumn(search[key].actualField || key)
     const compared = Object.keys(filters).filter(key => simple(search[key])).map(columnOf)
+    // A list filter given one value is an equality too: IN (?) reads that value's rows in index order, as = does.
+    const oneValue = (key, value) => {
+      const operator = resolveSearchOperator(search[key])
+      if (['=', '=='].includes(operator)) return value !== null && value !== undefined && !Array.isArray(value)
+      return operator === 'in' && Array.isArray(value) && value.length === 1 && value[0] !== null && value[0] !== undefined
+    }
     const fixed = new Set([...owned, ...Object.entries(filters)
-      .filter(([key, value]) => simple(search[key]) && ['=', '=='].includes(resolveSearchOperator(search[key])) && value !== null && value !== undefined && !Array.isArray(value))
+      .filter(([key, value]) => simple(search[key]) && oneValue(key, value))
       .map(([key]) => columnOf(key))])
     const ordered = order ? lockOrderColumns(order, storageAdapter, fixed) : null
     // One pool can serve several databases, so the cache is per schema.
