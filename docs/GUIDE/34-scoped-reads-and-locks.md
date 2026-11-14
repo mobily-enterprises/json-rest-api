@@ -327,6 +327,14 @@ they too lock in one order. Hidden or missing ids throw
 locked rows show the latest committed values even when the transaction began
 earlier.
 
+On MySQL and MariaDB `lockByIds` reads the primary key (`FORCE INDEX
+(PRIMARY)`). InnoDB locks every row its read examines, and for a read whose
+columns an index on the ownership columns covers (an index on
+`(workspace_id, code)`, and a read of `code`), the optimizer can prefer that
+index: it then reads, and locks until commit, every row of the caller's owner
+rather than the listed ones. On the primary key the read examines, and holds,
+the listed rows alone.
+
 The lock covers the locked rows; their to-one links are checked for
 visibility afterwards, one read per linked table, as for `query`. In
 `lockByIds` and `lockWhere` that check sees the targets as last committed, as

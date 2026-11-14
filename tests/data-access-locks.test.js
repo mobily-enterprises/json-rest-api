@@ -283,6 +283,73 @@ describe(`Row locks and claims (${storageMode.mode})`, { skip: tableOnly }, () =
     assert.deepEqual(await heldWhileWaiting(), { held: ['free', 'free'], locked: ['1', '2', '3'] })
   })
 
+  // InnoDB locks every row a locking read examines. An index that starts with the ownership column and covers the
+  // columns read (an index on the owner and code covers code; every secondary index covers an id-only read) can be read
+  // for the owner's whole range, the other ids dropped after their rows were locked.
+  it('lockByIds holds the listed rows alone, also where an ownership index covers what it reads (MySQL and MariaDB read the primary key)', { skip: !serverDatabase && 'SQLite takes no row locks' }, async t => {
+    // Areas of an owner, with no links and no row policy, so a read of the code reads only columns the index holds.
+    if (!fixture.api.resources.da_areas) {
+      await fixture.api.addResource('da_areas', {
+        schema: { id: { type: 'id' }, workspace_id: { type: 'string', required: true, max: 40 }, code: { type: 'string', required: true, max: 40 } },
+        autofilter: 'workspace',
+        indexes: [{ columns: ['workspace_id', 'code'] }],
+        tableName: 'da_areas'
+      })
+      await fixture.api.resources.da_areas.createKnexTable()
+    }
+    const areas = fixture.api.resources.da_areas
+    const lockBusy = error => error?.code === '55P03' || NOWAIT_MYSQL_CODE.test(error?.code ?? '')
+    const free = id => fixture.knex.transaction(probe => probe('da_areas').where({ id }).forUpdate().noWait())
+      .then(() => true, error => { if (lockBusy(error)) return false; throw error })
+    // Both table sizes are measured before anything is asserted, so a failure shows the evidence of each.
+    const seen = []
+    for (const size of [4, 400]) {
+      await fixture.knex('da_areas').del()
+      for (let start = 0; start < size; start += 200) {
+        await fixture.knex('da_areas').insert(Array.from({ length: Math.min(200, size - start) }, (_, index) => ({ workspace_id: 'ws-a', code: `A${start + index}` })))
+      }
+      await fixture.knex('da_areas').insert({ workspace_id: 'ws-b', code: 'B0' })
+      if (isMysql) await fixture.knex.raw('analyze table da_areas')
+      const owned = (await fixture.knex('da_areas').where({ workspace_id: 'ws-a' }).orderBy('id').select('id')).map(row => String(row.id))
+      const [other] = (await fixture.knex('da_areas').where({ workspace_id: 'ws-b' }).select('id')).map(row => String(row.id))
+      // Locking the first and third: probe the owner's first four rows, its last and the other owner's row.
+      const listed = [owned[2], owned[0]]
+      const probed = [...new Set([...owned.slice(0, 4), owned.at(-1), other])]
+      for (const fieldset of ['code', '']) {
+        const label = `${owned.length} rows of the owner, fields '${fieldset}'`
+        const statements = []
+        const record = query => { if (/ for update$/i.test(query.sql) && query.sql.includes('`da_areas`')) statements.push(query) }
+        const held = []
+        fixture.knex.on('query', record)
+        try {
+          await fixture.api.transaction(async transaction => {
+            const locked = await areas.lockByIds({ ids: listed, transaction, queryParams: { fields: { da_areas: fieldset } } }, workspaceA())
+            assert.deepEqual(locked.data.map(row => String(row.id)), [owned[0], owned[2]], label)
+            for (const id of probed) if (!(await free(id))) held.push(id)
+          })
+        } finally { fixture.knex.removeListener('query', record) }
+        const result = { label, expected: [owned[0], owned[2]], held }
+        if (isMysql) {
+          const [lockRead] = statements
+          const [plan] = await fixture.knex.raw(`explain ${lockRead.sql.replace(/ for update$/i, '')}`, lockRead.bindings)
+          const read = plan.find(row => row.table === 'da_areas')
+          Object.assign(result, { sql: lockRead.sql, key: read.key, plan })
+          t.diagnostic(`${label}: held ${held.length} of the ${probed.length} probed; plan ${read.type} ${read.key} rows ${read.rows} ${read.Extra ?? ''}`)
+        } else {
+          t.diagnostic(`${label}: held ${held.length} of the ${probed.length} probed`)
+        }
+        seen.push(result)
+      }
+    }
+    for (const { label, expected, held, sql, key, plan } of seen) {
+      if (isMysql) {
+        assert.match(sql, /from `da_areas` force index \(primary\)/, label)
+        assert.equal(key, 'PRIMARY', `${label}: ${JSON.stringify(plan)}`)
+      }
+      assert.deepEqual(held, expected, label)
+    }
+  })
+
   it('lockWhere of one row with limit: 1 sends one statement, as lockByIds does, at any table size', async () => {
     const fields = { da_entries: 'code,amount' }
     const sizes = []

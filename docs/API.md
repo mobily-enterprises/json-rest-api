@@ -1370,7 +1370,9 @@ committed. `lockByIds` locks the visible rows among `ids` in id order
 (`FOR UPDATE`), sorting lists longer than its 1,000-id statements first; hidden
 or missing ids throw `RestApiRecordsNotFoundError` unless `missing: 'skip'`. On
 MySQL and MariaDB it locks every listed id, hidden ones too, until commit, so
-pass ids from a scoped read, never a raw request list. `lockWhere` locks the
+pass ids from a scoped read, never a raw request list. There it reads the
+primary key (`FORCE INDEX (PRIMARY)`), so it examines, and locks, the listed
+rows alone rather than an owner's range of an index. `lockWhere` locks the
 visible rows the filters select in id order, waiting for other transactions and
 including rows that start to match meanwhile; more than 1,000 throw
 `RestApiRowLimitError`. With `sort` (stored fields, `'-'` for descending) it
