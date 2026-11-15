@@ -533,6 +533,18 @@ AnyAPI storage; see [Locking aggregates](./34-scoped-reads-and-locks.md#locking-
 Upgrading: nothing to change. A test that matches the check's SQL on MySQL
 and MariaDB sees the hint; PostgreSQL and SQLite read as before.
 
+## Long lists in locking reads (3.3.2)
+
+| 3.3.1 | 3.3.2 |
+| --- | --- |
+| on MariaDB a locking read with a list of 1,000 values or more (`in_predicate_conversion_threshold`), of the column's type, was planned as a join with a table of the values, which could read a key's leading columns and lock every row they matched: a `lockWhere` of the current revisions of 1,000 records by record and revision number held every revision of those records | every locking read sends a longer list as an OR of lists below the server's threshold, read as the API starts and published as `api.knex.capabilities.dbInfo.inPredicateConversionThreshold`, and holds the rows the list names alone |
+| on MariaDB a write's shared lock of the records it links to (a `postMany` or relationship write naming many targets) read the target table through the planner's choice, a full scan when the ids named much of the table, and held every owner's rows until commit | on MySQL and MariaDB it reads the target's primary key (`FORCE INDEX (PRIMARY)`), as `lockByIds` does, and on MariaDB holds the targets alone (MySQL 8.4 still reads a list that names a large share of a small table through its whole primary key: [Scoped reads and locks](./34-scoped-reads-and-locks.md)) |
+
+Upgrading: nothing to change. A test that matches a locking read's SQL on
+MariaDB with a list of 1,000 values or more sees `(column in (...) or column
+in (...))`, and a write's target lock on MySQL and MariaDB sees the hint. A
+locking read of your own Knex keeps its lists below the threshold itself.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

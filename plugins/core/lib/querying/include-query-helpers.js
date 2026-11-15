@@ -17,6 +17,7 @@ import { createStorageAdapter } from '../storage/storage-adapter.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 import { databaseFamily } from '../querying-writing/database-capabilities.js'
 import { lockConditionSubqueries, readByPrimaryKey } from './subquery-locks.js'
+import { splitLongInLists } from './in-lists.js'
 
 const getScopeStorageAdapter = (scopes, scopeName) => scopes[scopeName]?.vars?.storageAdapter || null
 
@@ -250,7 +251,8 @@ export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, cont
       }
     }
     const started = checks?.started()
-    if (lockedRead) lockConditionSubqueries(readByPrimaryKey(state.query, knex, adapter).forShare(), knex)
+    // The check's id list stays a range of the primary key on MariaDB too (see in-lists.js).
+    if (lockedRead) splitLongInLists(lockConditionSubqueries(readByPrimaryKey(state.query, knex, adapter).forShare(), knex), knex)
     for (const row of await state.query) visibleIds.add(String(row[idColumn]))
     if (checkScope) checks.remember(checkScope, visibleIds, strength, started)
   }

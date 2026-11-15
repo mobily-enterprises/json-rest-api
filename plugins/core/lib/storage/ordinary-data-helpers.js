@@ -23,6 +23,7 @@ import { applyDatabaseReadOptions, databaseIdentityExpression } from '../queryin
 import { whereInIdentifiers } from '../querying/identifier-query.js'
 import { columnsWithoutBlobs } from '../querying-writing/blob-fields.js'
 import { lockTargetRows } from '../writing/relationship-processor.js'
+import { readByPrimaryKey } from '../querying/subquery-locks.js'
 import { lockStrength, transactionChecks } from '../querying-writing/transaction-checks.js'
 
 /**
@@ -383,8 +384,9 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
       // Deduplicate policy joins by ID, without comparing JSON or other row values.
       let rows = storageAdapter.buildBaseQuery({ transaction: db })
       // A locking read names the ids itself, so it reads and locks only their
-      // rows, in id order; the scope stays in the subquery, whose rows it does not lock.
-      if (lock) rows = lockTargetRows(rows.modify(whereInIdentifiers, idProperty, values).orderBy(`${tableName}.${idProperty}`), lock, db)
+      // rows, in id order, through the primary key on MySQL and MariaDB (see
+      // readByPrimaryKey); the scope stays in the subquery, whose rows it does not lock.
+      if (lock) rows = lockTargetRows(readByPrimaryKey(rows, db, storageAdapter).modify(whereInIdentifiers, idProperty, values).orderBy(`${tableName}.${idProperty}`), lock, db)
       /** @type {StorageRow[]} */
       const records = await applyDatabaseReadOptions(rows.whereIn(idProperty, query).select(...(idsOnly ? [{ id: identities.id }] : [...listColumns, identities])))
       if (checks && checkScope) checks.remember(checkScope, records.map(record => String(record.id)), strength, started)

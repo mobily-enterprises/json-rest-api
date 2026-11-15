@@ -372,6 +372,8 @@ export interface DatabaseInfo {
   version: string
   /** MySQL and MariaDB: the server's max_allowed_packet, the longest statement it takes. */
   maxAllowedPacket?: number
+  /** MariaDB: the server's in_predicate_conversion_threshold, the shortest IN list it turns into a join (0: none). */
+  inPredicateConversionThreshold?: number
   error?: string
 }
 

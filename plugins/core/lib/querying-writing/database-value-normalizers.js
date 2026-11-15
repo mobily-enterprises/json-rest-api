@@ -4,6 +4,7 @@ import { filterResponseFields } from './field-utils.js'
 import { wrapUnexpectedError } from '../../../../lib/error-context.js'
 import { COMPUTED_DEPENDENCIES_KEY } from './knex-constants.js'
 import { getTemporalStorageCapabilities, SERIALIZATION_CAPABILITIES } from './database-capabilities.js'
+import { splitLongInLists } from '../querying/in-lists.js'
 
 const DATE_VALUE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 const RFC3339_DATETIME_PATTERN = /^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/
@@ -12,6 +13,9 @@ const INTEGER_VALUE_PATTERN = /^-?\d+$/
 const temporalContractCache = new Map()
 const CACHED_TEMPORAL_TYPES = new Set(['date', 'dateTime', 'time', 'epochMilliseconds', 'epochSeconds'])
 
+// How a read is sent: PostgreSQL's and MySQL's drivers return dates as text and
+// big integers exactly, and a locking read on MariaDB keeps each IN list below
+// the server's in_predicate_conversion_threshold (see in-lists.js).
 export function applyDatabaseReadOptions (query) {
   const client = query.client.config.client
   if (client === 'pg' || client === 'postgresql') {
@@ -25,6 +29,7 @@ export function applyDatabaseReadOptions (query) {
     })
   } else if (client === 'mysql' || client === 'mysql2') {
     query.options({ dateStrings: true, supportBigNumbers: true })
+    if (query._single.lock) splitLongInLists(query, query)
   }
   return query
 }

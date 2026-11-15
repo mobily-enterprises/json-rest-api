@@ -2,6 +2,7 @@
 
 import { errorMessage } from '../../../../lib/error-context.js'
 import { formatDiagnosticValue } from '../../../../lib/error-formatter.js'
+import { rememberInPredicateConversionThreshold } from '../querying/in-lists.js'
 
 // The SQL family of a Knex instance or transaction: 'sqlite', 'pg' or 'mysql' (MySQL and MariaDB).
 /** @param {import('knex').Knex} db */
@@ -172,12 +173,22 @@ export const getDatabaseInfo = async (knex, log) => {
     let version
     /** @type {number | undefined} */
     let maxAllowedPacket
+    /** @type {number | undefined} */
+    let inPredicateConversionThreshold
     switch (name) {
       case 'MySQL': {
         // The longest statement the server takes, which bounds a blob a write sends.
         const row = /** @type {{ version?: string, maxAllowedPacket?: number | string } | undefined} */ (await knex.first(knex.raw('VERSION() as version, @@max_allowed_packet as maxAllowedPacket')))
         version = row && 'version' in row ? row.version : undefined
         if (row && Number.isSafeInteger(Number(row.maxAllowedPacket))) maxAllowedPacket = Number(row.maxAllowedPacket)
+        // The shortest IN list MariaDB turns into a join, which a locking read keeps its lists below (see in-lists.js).
+        if (typeof version === 'string' && /mariadb/i.test(version)) {
+          const setting = /** @type {{ threshold?: number | string } | undefined} */ (await knex.first(knex.raw('@@in_predicate_conversion_threshold as threshold')))
+          if (setting && Number.isSafeInteger(Number(setting.threshold))) {
+            inPredicateConversionThreshold = Number(setting.threshold)
+            rememberInPredicateConversionThreshold(knex, inPredicateConversionThreshold)
+          }
+        }
         break
       }
       case 'SQLite':
@@ -191,7 +202,12 @@ export const getDatabaseInfo = async (knex, log) => {
         version = (await knex.raw('SELECT VERSION() as version'))?.[0]?.version
     }
     if (typeof version !== 'string') throw new Error('Database version query did not return a string')
-    return maxAllowedPacket === undefined ? { client: name, version } : { client: name, version, maxAllowedPacket }
+    return {
+      client: name,
+      version,
+      ...(maxAllowedPacket === undefined ? {} : { maxAllowedPacket }),
+      ...(inPredicateConversionThreshold === undefined ? {} : { inPredicateConversionThreshold })
+    }
   } catch (error) {
     // Capability observation is advisory; a failing diagnostic must not replace it.
     try {

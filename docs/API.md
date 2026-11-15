@@ -1449,7 +1449,11 @@ the target's primary key (`FORCE INDEX (PRIMARY)`) so it holds the linked rows
 alone, a plain read on PostgreSQL, never an earlier check reused. `claim` keeps its subqueries
 and its link checks plain. On SQLite,
 which has one writer, they take the database's write lock with a write that
-changes nothing, then read.
+changes nothing, then read. On MariaDB a locking read sends an IN list of
+`in_predicate_conversion_threshold` values or more (1,000 by default), a list
+filter's or its ids, as an OR of shorter lists, so the server does not plan it
+as a join that locks rows the list does not name
+([Scoped reads and locks](GUIDE/34-scoped-reads-and-locks.md)).
 
 `lockMode` picks the row lock: `'update'` (default) takes `FOR UPDATE`, and
 `'noKeyUpdate'` takes `FOR NO KEY UPDATE` on PostgreSQL, which still excludes

@@ -335,7 +335,12 @@ columns an index on the ownership columns covers (an index on
 `(workspace_id, code)`, and a read of `code`), the optimizer can prefer that
 index: it then reads, and locks until commit, every row of the caller's owner
 rather than the listed ones. On the primary key the read examines, and holds,
-the listed rows alone.
+the listed rows alone. One exception remains on MySQL: for a list that names a
+large share of a table (999 of a table's 2,400 rows in the library's tests,
+where a list of 300 was read as ranges), MySQL 8.4 reads the whole primary key, which
+the hint allows, and holds every row of the table until commit. MariaDB reads
+the listed rows. On MySQL, lock a large share of a small table in shorter
+lists, or lock the row that governs them.
 
 The lock covers the locked rows; their to-one links are checked for
 visibility afterwards, one read per linked table, as for `query`. In
@@ -447,6 +452,23 @@ the read examines and locks every row the filters match, the rows of other
 policy owners included, although it returns only the rows the policy shows.
 Give such a resource ownership fields, or lock its rows with `lockByIds` on ids
 from a scoped read.
+
+On MariaDB an IN list of `in_predicate_conversion_threshold` values or more
+(1,000 by default) becomes a join with a table of its values when their type
+is the column's (integers against an integer column). A locking read planned
+as that join can look its rows up through the leading columns of the index and
+lock every row they match: a `lockWhere` of the current revisions of 1,000
+records, filtered by record and by revision number under a unique key on
+`(workspace_id, record_id, revision_number)`, held every revision of those
+records. So on MariaDB every locking read the library sends (`lockByIds`,
+`lockWhere`, `claim`, a locking aggregate, a lock's link check and a write's
+lock of its targets) sends a longer list as an OR of lists below the server's
+threshold, which it reads as it starts
+(`api.knex.capabilities.dbInfo.inPredicateConversionThreshold`): the same
+rows, in one statement, read as ranges on the whole key. A list in a SELECT
+nested in the conditions (a row policy's subquery) is left as it is, and so is
+a locking read of your own Knex: keep their lists below the threshold, in
+chunks of 999 at the default. MySQL keeps every list a list.
 
 `claim({ filters, sort, limit, transaction, format, queryParams: { fields } })`
 takes up to `limit` matching rows (default 1, at most 1,000) that no other

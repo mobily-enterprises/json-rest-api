@@ -4,6 +4,7 @@ import { whereInIdentifiers } from '../querying/identifier-query.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 import { databaseFamily } from '../querying-writing/database-capabilities.js'
 import { lockStrength, transactionChecks } from '../querying-writing/transaction-checks.js'
+import { readByPrimaryKey } from '../querying/subquery-locks.js'
 
 export const lockRelationshipParent = async ({ context, helpers, scopeName }) => {
   if (!context.transaction) return
@@ -79,7 +80,9 @@ export const lockRelationshipTargets = async (api, transaction, identifiers, { e
   // One statement per target type at any count; whereInIdentifiers binds a long
   // id list as one parameter where the database limits parameters. Types lock
   // in name order and each statement in id order, so two writers naming the same
-  // targets in different orders take their locks in the same order.
+  // targets in different orders take their locks in the same order. On MySQL and
+  // MariaDB each reads through the primary key, so it holds the targets alone
+  // (see readByPrimaryKey).
   const checks = transactionChecks(transaction)
   for (const [type, { adapter, group, found }] of [...resources].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) {
     const idColumn = adapter.getIdColumn()
@@ -96,7 +99,7 @@ export const lockRelationshipTargets = async (api, transaction, identifiers, { e
       continue
     }
     const started = checks?.started()
-    const rows = await applyDatabaseReadOptions(lockTargetRows(query.orderBy(`${adapter.getTableName()}.${idColumn}`), lock, transaction)
+    const rows = await applyDatabaseReadOptions(lockTargetRows(readByPrimaryKey(query, transaction, adapter).orderBy(`${adapter.getTableName()}.${idColumn}`), lock, transaction)
       .select({ [idColumn]: databaseIdentityExpression(transaction, idColumn) }))
     for (const row of rows) found.add(String(row[idColumn]))
     if (checkScope) checks.remember(checkScope, rows.map(row => String(row[idColumn])), strength, started)
