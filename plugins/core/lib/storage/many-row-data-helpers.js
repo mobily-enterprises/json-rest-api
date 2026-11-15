@@ -14,6 +14,7 @@ import { applyInsertReturning, databaseFamily } from '../querying-writing/databa
 import { blobRowsPerStatement } from '../querying-writing/blob-fields.js'
 import { loadRelationshipIdentifiers } from '../querying/relationship-identifiers.js'
 import { resolveSearchOperator } from '../querying/knex-query-helpers.js'
+import { runAggregateQuery } from '../querying/aggregate-query.js'
 import { buildJsonApiResponse } from '../querying/knex-json-api-transformers-querying.js'
 import { deletePivotReferences } from '../writing/many-to-many-manipulations.js'
 
@@ -697,7 +698,8 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     const added = query._statements.find(statement => ['join', 'with', 'union'].includes(statement.grouping))?.grouping
     if (added || query._single.table !== tableName) {
       const what = { join: 'joins', with: 'a common table expression', union: 'a set operation' }[added] ?? 'another source table'
-      const message = `${operation} on '${scopeName}' needs a single-table query, but its filters or row policy add ${what}`
+      const message = `${operation} on '${scopeName}' needs a single-table query, but its filters or row policy add ${what}: ` +
+        "filter on the resource's own fields, and have a row policy test another table in a subquery (whereExists or whereIn), not a join"
       throw new RestApiValidationError(message, { fields: ['filters'], violations: [{ field: 'filters', rule: `${purpose}_single_table`, message }] })
     }
     if (purpose === 'lock') lockConditionSubqueries(query, context.db)
@@ -769,10 +771,11 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
    * secondary index with.
    * Returns the index's name and, for an `order`, the ORDER BY that reads it
    * in that order.
-   * @param {{ scopeName: string, context: any, storageAdapter: any, tableName: string, filters?: Record<string, unknown>, order?: Array<{ field: string, direction: 'asc' | 'desc' }> }} request
+   * `operation` names the call in the error.
+   * @param {{ scopeName: string, context: any, storageAdapter: any, tableName: string, filters?: Record<string, unknown>, order?: Array<{ field: string, direction: 'asc' | 'desc' }>, operation?: string }} request
    * @returns {Promise<{ name: string, orderBy: Array<{ column: string, direction: 'asc' | 'desc' }> | null }>}
    */
-  const lockIndexFor = async ({ scopeName, context, storageAdapter, tableName, filters = {}, order }) => {
+  const lockIndexFor = async ({ scopeName, context, storageAdapter, tableName, filters = {}, order, operation = 'lockWhere' }) => {
     const owned = Object.entries(context[writeConditions]?.[scopeName] || {})
       .filter(([, value]) => value !== null && value !== ANY_OWNER)
       .map(([field]) => storageAdapter.translateColumn(field))
@@ -814,7 +817,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
         : `, and after the columns the read fixes to one value holds ${sorted.length ? `${sorted.join(', ')} (all ascending or all descending)` : 'no other column'}, so it reads the rows in the order lockWhere's sort or limit locks them`
       throw new RestApiBulkWriteUnsupportedError({
         resourceType: scopeName,
-        operation: 'lockWhere',
+        operation,
         reason: `on MySQL and MariaDB a locking read locks every row it examines, in the order it reads them; add a visible index of '${tableName}' that starts with ${start}${then}`
       })
     }
@@ -873,6 +876,61 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     return document
   }
 
+  // The row count a PostgreSQL locking aggregate reads beside the measures,
+  // named so that no measure can have its name (see dataLockAggregate).
+  const ROW_COUNT = { name: '#rows', fn: 'count', field: '*', definition: null, alias: 'm_rows', where: null }
+
+  /**
+   * The totals of an aggregate without groupBy over the visible rows the
+   * filters select, read with `lockMode`'s row lock on the rows the totals
+   * read, which stays until the transaction ends. The scope is a lock's
+   * (purpose 'lock': a single-table read, the row policy's subqueries locked,
+   * an optional owner's shared rows left out), and no row leaves the database.
+   * MySQL and MariaDB lock in the aggregate's own statement, on the index
+   * lockIndexFor forces: InnoDB locks each index record the read examines with
+   * the gap before it, and the row too when the read needs a column the index
+   * lacks, so under REPEATABLE READ an insert into the range, a delete, or a
+   * change of a column the totals read waits. PostgreSQL refuses a lock clause
+   * beside aggregate functions, so the rows are locked in a derived table of
+   * the columns the measures read and totalled outside it. Its statement finds
+   * only the rows committed when it began, so, as dataLockWhere does, the read
+   * runs again under the locks it holds until its row count stops growing:
+   * held rows cannot change or leave, so an equal count is an equal set.
+   * FOR SHARE holds rows that exist: a PostgreSQL insert of a row the filters
+   * select does not wait. SQLite takes its write lock, then totals plainly.
+   * @param {{ scopeName: string, context: any, runHooks: Function, plan: any, lockMode: 'update' | 'noKeyUpdate' | 'share' }} request
+   */
+  const dataLockAggregate = async ({ scopeName, context, runHooks, plan, lockMode }) => {
+    const db = context.db
+    const family = databaseFamily(db)
+    const filters = context.queryParams.filters
+    const counted = family === 'pg' ? { ...plan, measures: [...plan.measures, ROW_COUNT] } : plan
+    const read = async () => {
+      const { query, storageAdapter, tableName, idColumn } = await lockingQuery({ scopeName, context, runHooks, operation: 'aggregate', purpose: 'lock', filters })
+      let source = query
+      if (family === 'mysql') {
+        const index = await lockIndexFor({ scopeName, context, storageAdapter, tableName, filters, operation: 'aggregate' })
+        lockRows(query.from(db.raw('?? force index (??)', [tableName, index.name])), db, { lockMode })
+      } else if (family === 'pg') {
+        const fields = new Set(plan.measures.flatMap(measure => [measure.field, ...(measure.where || []).map(condition => condition.field)]))
+        fields.delete('*')
+        const columns = [idColumn, ...[...fields].map(field => `${tableName}.${storageAdapter.translateColumn(field)}`)]
+        source = db.from(lockRows(query.clearSelect().select(columns), db, { lockMode }).as(tableName))
+      }
+      const { data: [totals] } = await runAggregateQuery({ source, sourceTable: tableName, storageAdapter, db, plan: counted })
+      return totals
+    }
+    let totals = await read()
+    if (family === 'pg') {
+      for (let previous = -1; totals[ROW_COUNT.name] > previous;) {
+        previous = totals[ROW_COUNT.name]
+        totals = await read()
+      }
+      delete totals[ROW_COUNT.name]
+    }
+    return { data: [totals] }
+  }
+
   /**
    * Take up to `limit` matching rows no other transaction holds.
    * @param {{ scopeName: string, context: any, runHooks: Function, filters?: Record<string, unknown>, sort: Array<{ field: string, direction: 'asc' | 'desc' }>, limit: number, lockMode?: 'update' | 'noKeyUpdate' }} request
@@ -915,7 +973,7 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
     return claimed
   }
 
-  return { dataScopedQuery, dataVisibleIds, dataIdsByKeys, dataInsertMany, dataUpdateByIds, dataDeleteByIds, dataLockByIds, dataLockWhere, dataClaim }
+  return { dataScopedQuery, dataVisibleIds, dataIdsByKeys, dataInsertMany, dataUpdateByIds, dataDeleteByIds, dataLockByIds, dataLockWhere, dataLockAggregate, dataClaim }
 }
 
 // How many leading columns of a MySQL index a lockWhere fixes to one value,

@@ -1,6 +1,6 @@
 import type { Knex } from 'knex'
 import type { ManagedTransactionParam } from './transactions.js'
-import type { DataAccessMethods } from './data-access-methods.js'
+import type { DataAccessMethods, LockMode } from './data-access-methods.js'
 import type {
   CollectionResult, DirectResourceId, InputResourceId, InputResourceIdentifier, ResourceFormat,
   SingleResourceResult, WriteResult, WriteReturning
@@ -59,6 +59,9 @@ export interface AggregateParams extends TransactionParam {
     // Grouped results only.
     page?: { size?: number; number?: number }
   }
+  // Read the totals with this row lock on the rows they read, held until the transaction
+  // ends ('share' for a check that only reads them). Needs transaction; refuses groupBy.
+  lockMode?: LockMode
 }
 export interface AggregateResult {
   data: Array<Record<string, unknown>>

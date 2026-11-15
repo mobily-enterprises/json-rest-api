@@ -46,7 +46,7 @@ export interface UpsertOptions<Input extends object> {
 // is FOR NO KEY UPDATE on PostgreSQL, which lets other transactions insert or change rows whose
 // foreign keys reference the locked ones; MySQL, MariaDB and SQLite take FOR UPDATE for it.
 export type ExclusiveLockMode = 'update' | 'noKeyUpdate'
-// lockByIds and lockWhere also take 'share': FOR SHARE (LOCK IN SHARE MODE on MySQL and MariaDB),
+// lockByIds, lockWhere and aggregate also take 'share': FOR SHARE (LOCK IN SHARE MODE on MySQL and MariaDB),
 // which other readers and shared locks pass and writes and exclusive locks wait for. Never write
 // a row the same transaction holds shared: two transactions doing so deadlock.
 export type LockMode = ExclusiveLockMode | 'share'

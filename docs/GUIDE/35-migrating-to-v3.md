@@ -513,15 +513,26 @@ index names only, sets the hint once, and throws a `TypeError` on PostgreSQL
 and SQLite; a policy shared across databases calls it only on MySQL and
 MariaDB. A name no index has fails the read there (MySQL errno 1176).
 
+## Locking aggregates (3.3.0)
+
+| 3.2.0 | 3.3.0 |
+| --- | --- |
+| totals that had to stay as read until commit (a count or sum checked before a save) needed `lockWhere` on the rows, which read every row into the application and stopped at 1,000 | `aggregate({ measures, queryParams: { filters }, lockMode, transaction })` reads the totals with that row lock on the rows they read, in one statement on MySQL, MariaDB and SQLite, and returns totals only, at any row count; on PostgreSQL the rows are locked in a derived table and the read runs again until no new row appears |
+| a lock or claim refused for a join named what the query added | the message also names the fix: filter on the resource's own fields, and test another table in a subquery |
+
+Upgrading: nothing changes until a call passes `lockMode` to `aggregate`. A
+locking aggregate needs a transaction, takes no `groupBy`, and is refused by
+AnyAPI storage; see [Locking aggregates](./34-scoped-reads-and-locks.md#locking-aggregates).
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,
 `dataInsertMany`, `dataUpdateByIds`, `dataDeleteByIds`, `dataLockByIds`,
-`dataLockWhere` and `dataClaim`. They are optional: a storage plugin without them keeps working,
+`dataLockWhere`, `dataLockAggregate` (3.3.0) and `dataClaim`. They are optional: a storage plugin without them keeps working,
 and the new methods refuse its resources with
 `RestApiBulkWriteUnsupportedError`. `RestApiKnexPlugin` implements all of them;
 `RestApiAnyapiKnexPlugin` implements all but the lock helpers `dataLockByIds`,
-`dataLockWhere` and `dataClaim` (in 3.0.0 it implemented only `dataScopedQuery`).
+`dataLockWhere`, `dataLockAggregate` and `dataClaim` (in 3.0.0 it implemented only `dataScopedQuery`).
 
 ## Verify the port
 

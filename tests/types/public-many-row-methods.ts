@@ -26,8 +26,11 @@ const allNames: Array<string | undefined> = all.data.map(item => item.name)
 const locked = await items.lockByIds({ ids: [1, 2], transaction: raw })
 const lockedWhere = await items.lockWhere({ filters: { name: 'First' }, transaction })
 const claimed = await items.claim({ filters: { name: 'queued' }, sort: ['-rank'], limit: 10, transaction })
-void [nothing, createdName, upsertedId, patchedName, deletedId, query, allNames, locked, lockedWhere, claimed]
+const lockedTotals = await items.aggregate({ measures: { rows: { count: '*' }, ranks: { sum: 'rank' } }, queryParams: { filters: { name: 'First' } }, lockMode: 'share', transaction })
+void [nothing, createdName, upsertedId, patchedName, deletedId, query, allNames, locked, lockedWhere, claimed, lockedTotals.data[0]]
 
+// @ts-expect-error A locking aggregate takes a lock read's lock modes.
+await items.aggregate({ measures: { rows: { count: '*' } }, lockMode: 'exclusive', transaction })
 // @ts-expect-error Many-row writes need a managed transaction from api.transaction.
 await items.postMany({ data: [{ name: 'Raw' }], transaction: raw })
 // @ts-expect-error Many-row writes are all-or-nothing; there is no atomic option.

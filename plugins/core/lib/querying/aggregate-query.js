@@ -14,7 +14,7 @@ const MEASURES = {
   min: ORDERED_TYPES,
   max: ORDERED_TYPES,
 }
-const PARAMS = new Set(['groupBy', 'measures', 'queryParams', 'transaction'])
+const PARAMS = new Set(['groupBy', 'measures', 'queryParams', 'transaction', 'lockMode'])
 const QUERY_PARAMS = new Set(['filters', 'sort', 'page'])
 const OUTPUT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 const AGGREGATE_ALIAS = '__jra_aggregate'

@@ -1168,7 +1168,8 @@ await api.resources.sales.aggregate(params, context)
 | `queryParams.filters` | object | Search schema filters, validated as for `query`. |
 | `queryParams.sort` | string[] | Grouped field or measure names, `-` for descending. Grouped fields break ties. |
 | `queryParams.page` | object | `size` and `number`, for grouped results only. `size` defaults to `queryDefaultLimit` and cannot exceed `queryMaxLimit`. |
-| `transaction` | Knex transaction | Optional transaction to read in. |
+| `transaction` | Knex transaction | Optional transaction to read in; required with `lockMode`. |
+| `lockMode` | `'share'` \| `'update'` \| `'noKeyUpdate'` | Read the totals with this row lock on the rows they read, held until the transaction ends: a [locking aggregate](#locking-aggregates). Table storage only; refuses `groupBy`. |
 
 `sum` and `avg` take numeric fields; `min` and `max` also take strings, dates and
 times. Grouping and counting accept any scalar stored field, including belongs-to
@@ -1224,6 +1225,42 @@ name. PostgreSQL has zone data; MySQL and MariaDB need their time zone tables
 loaded (checked once per name); SQLite takes offsets only. `date` fields have
 no time of day and take no time zone. Buckets need table storage; AnyAPI
 resources refuse them.
+
+#### Locking aggregates
+
+Totals that must stay as read until the transaction ends (a count checked
+before a save adds a row) take `lockMode` inside a transaction. The totals are
+read with that row lock on the rows they read, in the scope of a lock read
+(row policies and autofilters see `queryPurpose: 'lock'`, an optional owner's
+shared rows are left out, and a query that joins another table is refused),
+and no row is read into the application, however many there are:
+
+```javascript
+await api.transaction(async transaction => {
+  const { data: [totals] } = await api.resources.sales.aggregate({
+    measures: { open: { count: '*' }, exposure: { sum: 'amount' } },
+    queryParams: { filters: { status: 'open' } },
+    lockMode: 'share',
+    transaction
+  }, context)
+  if (totals.exposure + order.amount > limit) throw new Error('over the limit')
+  await api.resources.sales.post({ data: order, transaction }, context)
+})
+```
+
+`'share'` lets other transactions read and share-lock the rows while an update
+or delete of them waits; `'update'` and `'noKeyUpdate'` lock them as
+`lockWhere` does. MySQL, MariaDB and SQLite run one statement; PostgreSQL,
+which refuses a lock clause beside aggregate functions, locks the rows in a
+derived table and reads again until no new row appears. Whether an insert of a
+new matching row waits depends on the database: see
+[Locking aggregates](GUIDE/34-scoped-reads-and-locks.md#locking-aggregates).
+Refusals, before any statement: no transaction
+(`RestApiLockOutsideTransactionError`), `groupBy` (`RestApiValidationError`,
+rule `lock_aggregate_group`; total each group with a measure's `where`), an
+unknown lock mode (rule `lock_mode`), a join (rule `lock_single_table`), AnyAPI
+storage, and on MySQL and MariaDB a read with no index to keep it inside the
+caller's rows (`RestApiBulkWriteUnsupportedError`, as `lockWhere`).
 
 #### Return Value
 
@@ -1369,6 +1406,9 @@ await api.transaction(async transaction => {
   const { data: taken } = await resource.claim({ filters, sort, limit, transaction, lockMode, format, queryParams: { fields } }, context)
 })
 ```
+
+To lock the totals of the rows rather than read the rows, pass `lockMode` to
+`aggregate` ([locking aggregates](#locking-aggregates)).
 
 All three need a transaction (`RestApiLockOutsideTransactionError` otherwise)
 and return the records as the locking read saw them, through the read hooks of

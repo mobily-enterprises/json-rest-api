@@ -120,10 +120,11 @@ const NO_SHARE = Object.freeze({
 })
 
 /**
- * The row lock a lock read or patchWhere takes. 'noKeyUpdate' takes FOR NO KEY
- * UPDATE on PostgreSQL, which lets other transactions insert or update rows
- * whose foreign keys reference the locked ones; elsewhere it is FOR UPDATE.
- * 'share', for lockByIds and lockWhere only, takes FOR SHARE (LOCK IN SHARE
+ * The row lock a lock read, a locking aggregate or patchWhere takes.
+ * 'noKeyUpdate' takes FOR NO KEY UPDATE on PostgreSQL, which lets other
+ * transactions insert or update rows whose foreign keys reference the locked
+ * ones; elsewhere it is FOR UPDATE. 'share', for lockByIds, lockWhere and
+ * aggregate only, takes FOR SHARE (LOCK IN SHARE
  * MODE on MySQL and MariaDB): other transactions may still read the rows and
  * share-lock them, but not change, delete or exclusively lock them until it ends.
  * @param {unknown} value

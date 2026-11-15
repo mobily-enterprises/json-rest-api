@@ -286,9 +286,10 @@ and MariaDB 10.2+ do. AnyAPI storage applies the same rule.
 
 ## Row locks
 
-`lockByIds`, `lockWhere` and `claim` lock rows until the transaction ends. All
-three refuse to run outside a transaction (`RestApiLockOutsideTransactionError`);
-pass one from `api.transaction`. They return the records as the locking read saw
+`lockByIds`, `lockWhere` and `claim` lock rows until the transaction ends, and
+so does `aggregate` with `lockMode` ([below](#locking-aggregates)), which
+returns totals instead of rows. All of them refuse to run outside a transaction
+(`RestApiLockOutsideTransactionError`); pass one from `api.transaction`. They return the records as the locking read saw
 them, through the read pipeline of `query`: `checkDataPermissions` runs for each
 row as for `get`, then `enrichRecord`, computed fields and the `finish` and
 `finishQuery` hooks, which see `method: 'query'` and `lock: true`.
@@ -476,6 +477,71 @@ transaction that has already read keeps that snapshot, and if another
 connection has written since, taking the write lock fails with
 `SQLITE_BUSY_SNAPSHOT`; roll back and run the transaction again.
 
+### Locking aggregates
+
+A save that may go ahead only while a count or a sum stays as it was read (no
+more than ten open orders, an exposure under its limit) reads the totals with
+`aggregate` and `lockMode` inside its transaction. The totals come back as one
+row, read with that row lock on the rows they read, which stays until the
+transaction ends; no row is read into the application, and there is no 1,000-row
+limit, as there is for `lockWhere`:
+
+```js
+await api.transaction(async transaction => {
+  const { data: [totals] } = await api.resources.orders.aggregate({
+    measures: { open: { count: '*' }, exposure: { sum: 'amount' } },
+    queryParams: { filters: { status: 'open' } },
+    lockMode: 'share',
+    transaction
+  }, context)
+  if (totals.open >= 10) throw new Error('ten orders are open already')
+  await api.resources.orders.post({ data: order, transaction }, context)
+})
+```
+
+The read is scoped as a lock is: permissions are checked as a `query`, hooks
+see `lock: true`, row policies and autofilters see `queryPurpose: 'lock'`, an
+optional owner's shared rows are left out ([Shared rows](#shared-rows)), the
+policy's subqueries take a shared lock ([below](#a-locks-row-policy-reads-current-rows)),
+and a filter or policy that joins another table is refused (rule
+`lock_single_table`). `lockMode` takes the lock modes of `lockWhere`:
+`'share'` for a check, which other transactions' shared checks pass while an
+update or delete of the rows waits; `'update'` or `'noKeyUpdate'` to hold them
+exclusively. Refused before any statement, each naming its fix: no
+transaction; `groupBy` (rule `lock_aggregate_group`), since a locking
+aggregate is one row of totals: total each group with a measure's `where`, as
+`open` does in the [aggregate reference](../API.md#conditional-measures), or
+lock the rows themselves with `lockWhere`; an unknown lock mode (rule
+`lock_mode`); AnyAPI storage (`RestApiBulkWriteUnsupportedError`).
+
+What the lock holds depends on the database:
+
+| Database | Statement | An update or delete of a counted row | An insert of a row the filters select |
+| --- | --- | --- | --- |
+| PostgreSQL | `SELECT … FROM (SELECT id, the measured columns … FOR SHARE) AS t`, since PostgreSQL refuses a lock clause beside aggregate functions; read again under the locks it holds until its row count stops growing | waits | does not wait: `FOR SHARE` holds the rows that exist |
+| MySQL 8, MariaDB 10.6+ | `SELECT count(*) … FORCE INDEX (…) LOCK IN SHARE MODE`, one statement, on the index `lockWhere` would force | waits, unless the read found the row in an index that holds every column it reads and the update changes none of them (it then changes no total) | waits under REPEATABLE READ, the default: InnoDB locks the gaps of the index range it read; not under READ COMMITTED |
+| SQLite | the write lock, then a plain aggregate | waits (one writer) | waits (one writer) |
+
+On PostgreSQL a statement finds only the rows committed when it began, so a
+row that started to match while the read waited for a lock would be missing
+from the totals; as `lockWhere` does, the read runs again under the locks it
+already holds until its row count stops growing. The held rows cannot change
+or leave meanwhile, so an equal count is an equal set: with nothing committed
+in between, that is two statements. On MySQL and MariaDB the read examines,
+and locks, every row of the index range it reads, the caller's rows its row
+policy hides included, as `lockWhere` does, and without an index that keeps it
+inside the caller's rows it is refused with the same
+`RestApiBulkWriteUnsupportedError`, naming the index to add.
+
+Two transactions that each check the totals and then insert are not kept
+apart by shared locks alone. On PostgreSQL both inserts go through. On MySQL
+and MariaDB each insert waits for the other transaction's lock on the range,
+and the database fails one of them as a deadlock, to be retried. When such
+saves must take turns, have each lock one row that governs the set first (the
+account or workspace the rows belong to, with `lockByIds`), then read the
+totals: the second save waits for the first to commit, and its totals include
+the first save's row.
+
 ### A lock's row policy reads current rows
 
 A row policy usually decides visibility through other tables: a `whereExists`
@@ -602,7 +668,8 @@ await api.transaction(async transaction => {
 
 A check that only reads rows and needs them unchanged until the transaction
 ends (a membership that must stay active while a document is filed under it)
-passes `lockMode: 'share'` to `lockByIds` or `lockWhere`. PostgreSQL takes
+passes `lockMode: 'share'` to `lockByIds` or `lockWhere`, or to `aggregate`
+for their totals. PostgreSQL takes
 `FOR SHARE`, and MySQL and MariaDB `LOCK IN SHARE MODE`: other transactions
 still read the rows and take shared locks on them, so concurrent checks do not
 queue behind each other, but an update, a delete or an exclusive lock of the
