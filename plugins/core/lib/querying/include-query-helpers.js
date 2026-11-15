@@ -16,7 +16,7 @@ import {
 import { createStorageAdapter } from '../storage/storage-adapter.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression } from '../querying-writing/database-value-normalizers.js'
 import { databaseFamily } from '../querying-writing/database-capabilities.js'
-import { lockConditionSubqueries } from './subquery-locks.js'
+import { lockConditionSubqueries, readByPrimaryKey } from './subquery-locks.js'
 
 const getScopeStorageAdapter = (scopes, scopeName) => scopes[scopeName]?.vars?.storageAdapter || null
 
@@ -196,7 +196,9 @@ export const applyScopeFiltersToIncludeQuery = async ({
 // With `locked`, MySQL and MariaDB read them with a locking read, which sees
 // rows committed after the transaction's snapshot (see dataGetMinimal), and
 // the SELECTs the target's scope nests in it lock too, so its row policy
-// decides from the rows as last committed (see subquery-locks.js).
+// decides from the rows as last committed (see subquery-locks.js). That read
+// goes through the target's primary key, so it examines, and holds shared,
+// the linked rows alone, never other owners' rows (see readByPrimaryKey).
 export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, context, scoped = true, locked = false }) => {
   const idsByType = new Map()
   for (const { type, id } of identifiers) {
@@ -248,7 +250,7 @@ export const filterVisibleIdentifiers = async ({ identifiers, scopes, knex, cont
       }
     }
     const started = checks?.started()
-    if (lockedRead) lockConditionSubqueries(state.query.forShare(), knex)
+    if (lockedRead) lockConditionSubqueries(readByPrimaryKey(state.query, knex, adapter).forShare(), knex)
     for (const row of await state.query) visibleIds.add(String(row[idColumn]))
     if (checkScope) checks.remember(checkScope, visibleIds, strength, started)
   }

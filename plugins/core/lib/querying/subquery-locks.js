@@ -207,3 +207,27 @@ export function lockConditionSubqueries (query, db) {
   lockNested(query, family)
   return query
 }
+
+/**
+ * Sends a lock read of rows by id through the primary key on MySQL and
+ * MariaDB: the table it reads by name takes FORCE INDEX (PRIMARY), so the read
+ * examines, and locks, the listed rows alone. InnoDB locks every row a locking
+ * read examines and holds the locks until the transaction ends, while the
+ * optimizer, left to choose, may examine others: the owner's whole range of a
+ * secondary index that starts with the ownership columns and covers the
+ * columns read (an id-only read is covered by every one, as each ends with the
+ * primary key), or the whole table, every owner's rows, when the id list is
+ * long next to it. A read of an AnyAPI table, whose ids are no primary key, or
+ * of another source than the table by name, stays as it is, as does every read
+ * on PostgreSQL and SQLite. Returns `query`.
+ * @param {any} query a SELECT of `adapter`'s table
+ * @param {import('knex').Knex} db
+ * @param {{ getTableName: () => string, isCanonical: () => boolean }} adapter the table's storage adapter
+ */
+export function readByPrimaryKey (query, db, adapter) {
+  const tableName = adapter.getTableName()
+  if (databaseFamily(db) === 'mysql' && !adapter.isCanonical() && query._single.table === tableName) {
+    query.from(db.raw('?? force index (primary)', [tableName]))
+  }
+  return query
+}

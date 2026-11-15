@@ -524,6 +524,15 @@ Upgrading: nothing changes until a call passes `lockMode` to `aggregate`. A
 locking aggregate needs a transaction, takes no `groupBy`, and is refused by
 AnyAPI storage; see [Locking aggregates](./34-scoped-reads-and-locks.md#locking-aggregates).
 
+## Link checks through the primary key (3.3.1)
+
+| 3.3.0 | 3.3.1 |
+| --- | --- |
+| on MySQL and MariaDB the shared-lock read that checks a lock's to-one links read the target table through the planner's choice: the caller's whole range of an index that starts with the ownership columns, or, on MariaDB with a long list of ids, every row of the table, and held every row it read until commit: the caller's rows no lock named, and in a full scan other owners' rows too | it reads the target's primary key (`FORCE INDEX (PRIMARY)`), as `lockByIds` does, and holds the linked rows alone |
+
+Upgrading: nothing to change. A test that matches the check's SQL on MySQL
+and MariaDB sees the hint; PostgreSQL and SQLite read as before.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

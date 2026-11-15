@@ -5,7 +5,7 @@
 import { RestApiBulkInsertIdsError, RestApiBulkWriteUnsupportedError, RestApiResourceError, RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 import { handledQueryError } from '../../../../lib/error-context.js'
 import { withQueryFilteringContext } from '../querying/query-builder-utils.js'
-import { lockConditionSubqueries } from '../querying/subquery-locks.js'
+import { lockConditionSubqueries, readByPrimaryKey } from '../querying/subquery-locks.js'
 import { ANY_OWNER, applyWriteConditions, hasWriteConditions, writeConditions } from '../querying/query-constraint.js'
 import { applyDatabaseReadOptions, databaseIdentityExpression, normalizeStoredFieldValue } from '../querying-writing/database-value-normalizers.js'
 import { currentKnexMysqlSchema, listKnexMysqlIndexes, listKnexUniqueKeyColumns } from '../dbIntrospection.js'
@@ -712,19 +712,14 @@ export function createManyRowDataHelpers ({ api, getScopeStorageAdapter, scopes,
    * read that carries the scope and row-policy predicates. No plain read comes
    * first: under REPEATABLE READ (MySQL, MariaDB) it would fix the snapshot
    * before the lock wait, hiding what the lock holder commits meanwhile.
-   * On MySQL and MariaDB the read is forced onto the primary key, so it
-   * examines, and locks, the listed rows alone: InnoDB locks every row a
-   * locking read examines, and when a secondary index that starts with the
-   * ownership columns covers the columns read (an id-only read is covered by
-   * every one, as each ends with the primary key), the optimizer may read the
-   * owner's whole range of it and drop the other ids afterwards.
+   * On MySQL and MariaDB the read goes through the primary key, so it
+   * examines, and locks, the listed rows alone (see readByPrimaryKey).
    * Returns the rows the locking read saw as a JSON:API document.
    * @param {{ scopeName: string, context: any, runHooks: Function, ids: Array<string | number>, lockMode?: 'update' | 'noKeyUpdate' | 'share' }} request
    */
   const dataLockByIds = async ({ scopeName, context, runHooks, ids, lockMode }) => {
     const { query, storageAdapter, tableName, idColumn } = await lockingQuery({ scopeName, context, runHooks, operation: 'lockByIds', purpose: 'lock' })
-    if (databaseFamily(context.db) === 'mysql') query.from(context.db.raw('?? force index (primary)', [tableName]))
-    query.whereIn(idColumn, ids.map(id => storageAdapter.translateFilterValue('id', id))).orderBy(idColumn)
+    readByPrimaryKey(query, context.db, storageAdapter).whereIn(idColumn, ids.map(id => storageAdapter.translateFilterValue('id', id))).orderBy(idColumn)
     return readRecords({ scopeName, context, query: lockRows(query, context.db, { lockMode }), tableName })
   }
 

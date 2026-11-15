@@ -348,7 +348,12 @@ so when that came before the lock (see above) a target another transaction
 committed, hid or deleted since would read as it was, and a link to a target
 committed since would show as `null`. The shared lock lets other transactions
 read the targets and insert rows that reference them, and makes a
-transaction that changes one wait until this one ends. On PostgreSQL the check
+transaction that changes one wait until this one ends. That read goes through
+the target table's primary key (`FORCE INDEX (PRIMARY)`), as `lockByIds` does,
+so it examines, and holds, the linked rows alone: through the planner's choice
+it could read the caller's whole range of an index that starts with the
+ownership columns, or, on MariaDB with a long list of ids, every row of the
+table, and hold them all until commit, other owners' rows too in a full scan. On PostgreSQL the check
 stays a plain read, which under READ COMMITTED sees the targets committed when
 it starts. On every database it reads again rather than reusing an earlier
 check of the same targets in the transaction. `claim`, which never waits for a

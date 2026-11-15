@@ -1444,8 +1444,9 @@ subquery's join conditions) takes a shared lock,
 whatever `lockMode`: the lock decides from those rows as last committed rather
 than from the transaction's snapshot, waits for a transaction changing them,
 and keeps them unchanged until commit. The locked rows' to-one links are then
-checked as last committed too: a shared-lock read on MySQL and MariaDB, a plain
-read on PostgreSQL, never an earlier check reused. `claim` keeps its subqueries
+checked as last committed too: a shared-lock read on MySQL and MariaDB, through
+the target's primary key (`FORCE INDEX (PRIMARY)`) so it holds the linked rows
+alone, a plain read on PostgreSQL, never an earlier check reused. `claim` keeps its subqueries
 and its link checks plain. On SQLite,
 which has one writer, they take the database's write lock with a write that
 changes nothing, then read.
