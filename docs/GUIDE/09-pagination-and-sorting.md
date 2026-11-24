@@ -36,16 +36,19 @@ for (const [name, code] of [
 
 The resource default sorts by name. A query may override it using
 `queryParams.sort`, for example `['-name']` for descending order. An ID tie-breaker
-provides stable ordering where the selected values are equal. `defaultSort`
+provides stable ordering where the selected values are equal; unless the sort
+names the ID, it takes the direction of the last sort key, so `['-name']` sorts
+as `['-name', '-id']` and `['name']` as `['name', 'id']`. `defaultSort`
 accepts a string or an array of strings; object-shaped defaults are rejected.
 
 Values that may be NULL sort after every other value, in either direction. The
 ID, and on table storage a `required` attribute that is not `nullable`, holds no
 NULL and sorts without that placement, so an index ending with the sort columns
 serves its pages in either direction on every database: an index on
-`(authorId, id)` serves books filtered by author and sorted by `-id`. A
-descending sort on another field still breaks ties by ascending ID; end it with
-`-id`, as in `['-name', '-id']`, to read it from a `(name, id)` index. Other sort
+`(authorId, id)` serves books filtered by author and sorted by `-id`, and one on
+`(name, id)` serves `['name']` and `['-name']`, whose ID follows the name's
+direction. A sort that names the ID against that direction, as `['-name', 'id']`,
+sorts the matching rows. Other sort
 values keep the placement: nullable attributes, attributes with a setter,
 serializer or `nullOnEmpty`, relationship fields, query projections and AnyAPI
 attributes (a field added later leaves existing records' slots empty).

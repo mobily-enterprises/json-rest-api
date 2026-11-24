@@ -53,13 +53,14 @@ describe(`Logical sort fields (${storageMode.mode})`, () => {
     [['id'], ['1', '2', '3', '4']],
     [['-id'], ['4', '3', '2', '1']],
     [['name'], ['2', '1', '4', '3']],
-    [['-name'], ['3', '1', '4', '2']],
+    // The ID follows a descending key: the Bravo and score-2 ties come 4, 1.
+    [['-name'], ['3', '4', '1', '2']],
     [['displayName'], ['2', '1', '4', '3']],
-    [['-displayName'], ['3', '1', '4', '2']],
+    [['-displayName'], ['3', '4', '1', '2']],
     [['score'], ['3', '1', '4', '2']],
-    [['-score'], ['1', '4', '3', '2']],
+    [['-score'], ['4', '1', '3', '2']],
     [['occurredAt'], ['3', '1', '4', '2']],
-    [['-occurredAt'], ['1', '4', '3', '2']]
+    [['-occurredAt'], ['4', '1', '3', '2']]
   ]) {
     for (const format of ['jsonapi', 'plain']) {
       it(`uses logical ${sort} for sparse offset and cursor pages (${format})`, async () => {

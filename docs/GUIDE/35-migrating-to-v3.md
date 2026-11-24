@@ -545,6 +545,19 @@ MariaDB with a list of 1,000 values or more sees `(column in (...) or column
 in (...))`, and a write's target lock on MySQL and MariaDB sees the hint. A
 locking read of your own Knex keeps its lists below the threshold itself.
 
+## Descending sorts read from an index (3.3.3)
+
+| 3.3.2 | 3.3.3 |
+| --- | --- |
+| the ID that breaks ties sorted ascending after every sort that did not name it: `['-sentOn']` read as `sentOn DESC, id ASC`, an order no plain index supplies, so a page of the newest rows sorted every matching row first | the ID takes the direction of the last sort key: `['-sentOn']` reads as `sentOn DESC, id DESC`, which an index ending with `(sentOn, id)` supplies read backward, for the first page and every cursor page |
+
+Upgrading: rows that tie on a descending last sort key come in descending ID
+order, in `query`, `queryAll`, include orders and cursors; an ascending last
+key, and a sort that names the ID, order as before. Write `['-sentOn', 'id']` to
+keep the old order. A reader that pages through such ties across the upgrade
+continues from its cursor in the new order, so it can meet a tied row twice or
+miss one: start it again. A test that matches the SQL sees `id` desc.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

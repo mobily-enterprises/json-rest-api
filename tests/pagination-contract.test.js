@@ -41,7 +41,8 @@ describe('Knex pagination contract', { skip: storageMode.isAnyApi() }, () => {
   })
 
   it('traverses every record once when sparse fields omit the default sort field', async () => {
-    const expected = await knex('cursor_products').orderBy('created_at', 'desc').orderBy('id', 'asc').pluck('id')
+    // The default sort is ['-createdAt'], whose ties break by descending ID.
+    const expected = await knex('cursor_products').orderBy('created_at', 'desc').orderBy('id', 'desc').pluck('id')
     const ids = []
     const cursors = new Set()
     let cursor

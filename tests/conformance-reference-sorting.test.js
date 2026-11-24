@@ -93,7 +93,8 @@ for (const hiddenBy of ['policy', 'workspace']) {
       for (const descending of [false, true]) {
         it(`sorts and traverses visible references with hidden/null ties (${format}, ${descending ? 'desc' : 'asc'})`, async () => {
           await traverse('items', 'group_id', descending, format,
-            descending ? ['104', '101', '106', '102', '103', '105'] : ['101', '106', '104', '102', '103', '105'],
+            // Ties, NULLs among them, break by ID in the sort's direction.
+            descending ? ['104', '106', '101', '105', '103', '102'] : ['101', '106', '104', '102', '103', '105'],
             { 101: '100', 102: null, 103: null, 104: '200', 105: null, 106: '100' })
         })
       }
@@ -108,8 +109,8 @@ for (const hiddenBy of ['policy', 'workspace']) {
       for (const descending of [false, true]) {
         it(`sorts polymorphic ${field} without exposing hidden linkage (${descending ? 'desc' : 'asc'})`, async () => {
           const byType = field === 'subject_type'
-          const visible = byType ? (descending ? ['203', '201', '206'] : ['201', '206', '203']) : (descending ? ['206', '203', '201'] : ['201', '203', '206'])
-          await traverse('notes', field, descending, 'jsonapi', [...visible, '202', '204', '205'],
+          const visible = byType ? (descending ? ['203', '206', '201'] : ['201', '206', '203']) : (descending ? ['206', '203', '201'] : ['201', '203', '206'])
+          await traverse('notes', field, descending, 'jsonapi', [...visible, ...(descending ? ['205', '204', '202'] : ['202', '204', '205'])],
             { 201: byType ? 'groups' : '100', 202: null, 203: byType ? 'items' : '101', 204: null, 205: null, 206: byType ? 'groups' : '200' })
         })
       }
@@ -138,8 +139,9 @@ for (const hiddenBy of ['policy', 'workspace']) {
     it('combines polymorphic type and ID sort keys in the same cursor', async () => {
       let queryParams = { sort: ['subject_type', '-subject_id'], page: { size: 1 } }
       const actual = []
-      const expected = ['206', '201', '203', '202', '204', '205']
-      const tokens = ['subject_type:groups,subject_id:200,id:206', 'subject_type:groups,subject_id:100,id:201', 'subject_type:items,subject_id:101,id:203', 'subject_type:~null,subject_id:~null,id:202', 'subject_type:~null,subject_id:~null,id:204']
+      // The ID follows -subject_id, the last key: the NULL rows come in descending ID order.
+      const expected = ['206', '201', '203', '205', '204', '202']
+      const tokens = ['subject_type:groups,subject_id:200,id:206', 'subject_type:groups,subject_id:100,id:201', 'subject_type:items,subject_id:101,id:203', 'subject_type:~null,subject_id:~null,id:205', 'subject_type:~null,subject_id:~null,id:204']
       for (let index = 0; index < expected.length; index++) {
         const result = await fixture.api.resources.notes.query({ queryParams }, viewer)
         actual.push(...result.data.map(row => row.id))

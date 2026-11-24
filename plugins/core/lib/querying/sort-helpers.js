@@ -28,7 +28,9 @@ export function normalizeStableSort (sort = [], { idField = 'id' } = {}) {
   })
 
   if (!hasId) {
-    sortList.push(idField)
+    // The ID takes the last key's direction, so an index ending with the sort
+    // columns and the ID supplies the whole order, read forward or backward.
+    sortList.push(sortList[sortList.length - 1]?.startsWith('-') ? `-${idField}` : idField)
   }
 
   return sortList

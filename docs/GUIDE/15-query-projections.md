@@ -173,7 +173,7 @@ const nextPage = await api.resources.authors.query({
 })
 ```
 
-`json-rest-api` automatically appends `id` as a stable tie-breaker for cursor ordering. That prevents duplicate or skipped rows when multiple records share the same projected value.
+`json-rest-api` automatically appends `id` as a stable tie-breaker for cursor ordering, in the direction of the last sort key (`-id` after `-full_name`). That prevents duplicate or skipped rows when multiple records share the same projected value.
 
 Projection cursors retain the SQL expression's value before output formatting
 and bind it directly on the next request. This also preserves precise timestamps

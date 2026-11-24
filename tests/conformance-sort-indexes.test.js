@@ -110,9 +110,26 @@ describe(`Indexed ordering and null placement (${storageMode.mode})`, () => {
     }
   }
 
+  // The implied ID takes the last key's direction: a descending key's ties come in
+  // descending ID order, an ascending key's in ascending ID order.
+  for (const { sort, field, value, descending } of [
+    { sort: ['-name'], field: 'name', value: 'Item 29', descending: true },
+    { sort: ['name'], field: 'name', value: 'Item 00', descending: false },
+    { sort: ['-rank'], field: 'rank', value: 2, descending: true },
+    { sort: ['rank', '-name'], field: 'rank', value: 0, descending: true }
+  ]) {
+    it(`breaks ${sort.join(',')} ties by ${descending ? 'descending' : 'ascending'} ID`, async () => {
+      const tied = rows.filter(row => row[field] === value)
+      if (sort.length > 1) tied.sort((a, b) => a.name < b.name ? 1 : a.name > b.name ? -1 : -byId(a, b))
+      else tied.sort((a, b) => descending ? -byId(a, b) : byId(a, b))
+      const result = await fixture.api.resources.items.query({ queryParams: { sort, fields: { items: 'name' }, page: { size: tied.length } } })
+      assert.deepEqual(result.data.map(row => row.id), tied.map(row => row.id))
+    })
+  }
+
   // The ID and the required name hold no NULL, so table storage sorts them without
   // a null placement; the nullable rank keeps it.
-  for (const sort of [['id'], ['-id'], ['name'], ['-name'], ['-name', '-id'], ['rank'], ['-rank', '-id']]) {
+  for (const sort of [['id'], ['-id'], ['name'], ['-name'], ['-name', '-id'], ['rank'], ['-rank'], ['-rank', '-id'], ['rank', '-name']]) {
     it(`pages ${sort.join(',')} forward and backward in the same order`, async () => {
       const expected = expectedOrder(sort)
       const forward = await readPages(sort, { size: 7 })
@@ -159,7 +176,8 @@ describe(`Indexed ordering and null placement (${storageMode.mode})`, () => {
   for (const { subject, sort, filters, index, tableOnly } of [
     { subject: 'the ID', sort: ['-id'], index: storageMode.isAnyApi() ? 'any_records_tenant_resource_logical_id_unique' : 'PRIMARY' },
     { subject: 'the ID within an indexed filter', sort: ['-id'], filters: { name: 'Item 07' }, index: 'sort_conformance_name', tableOnly: true },
-    { subject: 'a required indexed attribute', sort: ['-name', '-id'], index: 'sort_conformance_name', tableOnly: true }
+    { subject: 'a required indexed attribute', sort: ['-name', '-id'], index: 'sort_conformance_name', tableOnly: true },
+    { subject: 'a required indexed attribute with its ID implied', sort: ['-name'], index: 'sort_conformance_name', tableOnly: true }
   ]) {
     it(`reads descending pages on ${subject} from an index`, { skip: tableOnly && storageMode.isAnyApi() && 'AnyAPI attribute slots keep their null placement' }, async () => {
       const boundary = createCursor(expectedOrder(sort).filter(row => !filters || row.name === filters.name)[1], sortFields(sort))

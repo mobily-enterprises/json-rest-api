@@ -9,7 +9,8 @@ import { parseJsonApiQuery } from '../plugins/core/lib/querying-writing/connecto
 
 function compareRows (sort, idOrder) {
   return (left, right) => {
-    for (const token of [...sort, 'id']) {
+    // The ID breaks ties in the direction of the last sort key.
+    for (const token of [...sort, sort.at(-1).startsWith('-') ? '-id' : 'id']) {
       const field = token.replace(/^-/, '')
       const a = field === 'id' && idOrder === 'numeric' ? Number(left.id) : left[field]
       const b = field === 'id' && idOrder === 'numeric' ? Number(right.id) : right[field]

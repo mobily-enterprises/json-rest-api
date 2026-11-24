@@ -103,7 +103,8 @@ describe(`Custom scalar serialization (${storageMode.mode})`, () => {
           }
           calls.length = 0
           const page = cursor => items.query({ format, queryParams: { fields: { items: 'name' }, sort: [`${descending ? '-' : ''}${field}`], page: { size: 1, ...cursor } } })
-          const expected = descending ? ['3', '1', '2', '4'] : ['1', '2', '3', '4']
+          // Rows 1 and 2 tie; the ID follows the sort's direction.
+          const expected = descending ? ['3', '2', '1', '4'] : ['1', '2', '3', '4']
           const seen = []; const cursors = []
           let after, nextLink
           for (let index = 0; index < expected.length; index++) {

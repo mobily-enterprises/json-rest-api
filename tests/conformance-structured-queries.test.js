@@ -101,7 +101,8 @@ for (const type of ['object', 'array']) {
 
         for (const direction of ['', '-']) {
           it(`traverses extracted scalar projection cursors (${direction || 'ascending'}, ${format})`, async () => {
-            const expected = direction ? ['1', '3', '2', '4'] : ['2', '1', '3', '4']
+            // Rows 1 and 3 tie; the ID follows the sort's direction.
+            const expected = direction ? ['3', '1', '2', '4'] : ['2', '1', '3', '4']
             const query = page => items.query({ format, queryParams: { sort: [`${direction}payloadValue`], fields: { items: 'name' }, page: { size: 1, ...page } } })
             const seen = []; const cursors = []
             let after, response

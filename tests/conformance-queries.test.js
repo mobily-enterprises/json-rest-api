@@ -150,9 +150,11 @@ describe(`Shared query conformance (${storageMode.mode})`, () => {
         await groups.patch({ id: '3', format: 'plain', data: { name: 'Other' } })
         await items.patch({ id: '6', format: 'plain', data: { name: 'Alpha', group: '3' } })
         const params = { sort: [sort], filters: { childName: 'Alpha' }, fields: { groups: 'name' } }
+        // Groups 2 and 3 tie on the label, broken by ID in the sort's direction; group 1's is NULL.
+        const order = sort === 'sortLabel' ? ['2', '3', '1'] : ['3', '2', '1']
         const counted = await groups.query({ format, queryParams: { ...params, page: { number: 1, size: 1 } } })
         assert.equal(counted.meta.pagination.total, 3)
-        assert.deepEqual(ids(counted), ['2'])
+        assert.deepEqual(ids(counted), order.slice(0, 1))
         let queryParams = { ...params, page: { size: 1 } }
         const seen = []
         for (let page = 0; page < 4; page++) {
@@ -163,7 +165,7 @@ describe(`Shared query conformance (${storageMode.mode})`, () => {
           queryParams = fromLink(result.links.next, '/groups')
           assert(page < 3, 'Distinct cursor traversal must terminate')
         }
-        assert.deepEqual(seen, ['2', '3', '1'])
+        assert.deepEqual(seen, order)
         queryParams = { ...params, page: { size: 1, before: createCursor({ id: '1', sortLabel: null }, ['sortLabel', 'id']) } }
         const reversed = []
         for (let page = 0; page < 3; page++) {
@@ -173,7 +175,7 @@ describe(`Shared query conformance (${storageMode.mode})`, () => {
           queryParams = fromLink(result.links.next, '/groups')
           assert(page < 2, 'Distinct backward traversal must terminate')
         }
-        assert.deepEqual(reversed, ['2', '3'])
+        assert.deepEqual(reversed, order.slice(0, 2))
       })
     }
 
@@ -196,8 +198,9 @@ describe(`Shared query conformance (${storageMode.mode})`, () => {
 
     for (const [sort, expected] of [
       [['doubleRank'], ['5', '2', '3', '1', '4', '6']],
-      [['-doubleRank'], ['1', '2', '3', '5', '4', '6']],
-      [['displayName', '-rank'], ['2', '3', '5', '4', '1', '6']]
+      // Ties break by ID in the last key's direction.
+      [['-doubleRank'], ['1', '3', '2', '5', '6', '4']],
+      [['displayName', '-rank'], ['3', '2', '5', '4', '1', '6']]
     ]) {
       for (const mode of ['cursor', 'offset']) {
         it(`traverses ${mode} links for ${sort.join(',')} and capped sparse pages (${format})`, async () => {
