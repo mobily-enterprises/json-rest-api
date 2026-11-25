@@ -15,6 +15,7 @@ import { polymorphicFiltersHook, crossTableFiltersHook, basicFiltersHook } from 
 import { createStorageAdapterLookup } from './lib/storage/storage-adapter.js'
 import { translateCanonicalAttributesForStorage } from './lib/storage/canonical-storage-mapping.js'
 import { applyDatabaseReadOptions, normalizeStoredFieldValue } from './lib/querying-writing/database-value-normalizers.js'
+import { observingCapabilities } from './lib/querying-writing/database-capabilities.js'
 
 const DEFAULT_TENANT = 'default'
 const MIGRATION_BATCH_SIZE = 500
@@ -108,7 +109,9 @@ export const RestApiAnyapiKnexPlugin = {
 
     const linkStore = createCanonicalLinkStore({ api, getDescriptor, getScopeStorageAdapter })
     api.anyapi.links = linkStore.methods
-    helpers.dataRelatedIdsQuery = linkStore.dataRelatedIdsQuery
+    // Capabilities the start could not observe are observed again by the next call.
+    const observing = storageHelpers => observingCapabilities(storageHelpers, api.knex.capabilities)
+    Object.assign(helpers, observing({ dataRelatedIdsQuery: linkStore.dataRelatedIdsQuery }))
     const { buildIncludes, attachReverseRelationships, attachManyToManyRelationships } = createCanonicalRelationshipReader({
       api, knex, getDescriptor, getScopeStorageAdapter, linkStore
     })
@@ -314,7 +317,7 @@ export const RestApiAnyapiKnexPlugin = {
       attachManyToManyRelationships,
       applyBuiltInAnyApiQueryFilters
     })
-    Object.assign(helpers, canonicalHelpers)
+    Object.assign(helpers, observing(canonicalHelpers))
     // Many-row writes run table storage's statements on the resource's canonical
     // rows. Row locks and claims stay table-storage features.
     const { dataVisibleIds, dataIdsByKeys, dataInsertMany, dataUpdateByIds, dataDeleteByIds } = createManyRowDataHelpers({
@@ -325,7 +328,7 @@ export const RestApiAnyapiKnexPlugin = {
       scopedQuery: canonicalHelpers.dataScopedQuery,
       deleteLinks: (scopeName, context, ids) => linkStore.deleteResourceLinks({ descriptor: getDescriptor(scopeName), scopeName, ids, db: context.transaction })
     })
-    Object.assign(helpers, { dataVisibleIds, dataIdsByKeys, dataInsertMany, dataUpdateByIds, dataDeleteByIds })
+    Object.assign(helpers, observing({ dataVisibleIds, dataIdsByKeys, dataInsertMany, dataUpdateByIds, dataDeleteByIds }))
 
     addHook('resource:added', 'anyapi-register-resource', {}, async ({ context }) => {
       const { scopeName, scopeOptions = {} } = context

@@ -379,6 +379,7 @@ export interface DatabaseInfo {
 
 export interface CapabilityLogger {
   warn(message: string, details: unknown): unknown
+  info?(message: string, details: unknown): unknown
 }
 
 export type InsertResultMode = 'insert-id' | 'rows' | 'driver-defined'

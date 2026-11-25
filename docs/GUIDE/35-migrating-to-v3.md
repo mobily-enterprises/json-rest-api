@@ -560,6 +560,17 @@ continues from its cursor in the new order, so it can meet a tied row twice or
 miss one: start it again. A test that matches the SQL sees `id` desc, and on
 MySQL and MariaDB no `is null` term in a descending sort.
 
+## Capabilities observed after a failed start (3.3.3)
+
+| 3.3.2 | 3.3.3 |
+| --- | --- |
+| the storage plugins observed the database's version and settings once, as they started; if the database did not answer then, `api.knex.capabilities` read as unknown for the life of the process: no window functions (per-parent include limits refused on MySQL and MariaDB), no `in_predicate_conversion_threshold` (MariaDB locking reads sent long lists whole) and no `max_allowed_packet` (blob writes batched without it) | unknown capabilities are provisional: the next storage call observes again, through its own connection, and so on until an observation succeeds, which settles them in place and logs them. Calls meanwhile share one attempt, and a failed attempt logs its error as the first one did |
+
+Upgrading: nothing to change. An API that starts before its database answers
+reads `dbInfo.version` as `'unknown'`, with `dbInfo.error`, until a call
+reaches the database. A blob resource registered while the capabilities were
+unknown was not checked against `max_allowed_packet`, and is not checked later.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

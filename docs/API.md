@@ -2841,6 +2841,9 @@ and [query projections](GUIDE/15-query-projections.md).
 Both Knex plugins expose the detected window-function capability as
 `api.knex.capabilities.windowFunctions`. Per-parent include limits require that
 capability; the library rejects those limits when detection reports no support.
+Detection runs as the plugin starts; if the database does not answer then, the
+next storage call detects again, and so on until one succeeds, with concurrent
+calls sharing one attempt.
 The operation's `context.db` is a Knex connection or transaction. It does not
 provide `supportsWindowFunctions` or `supportsJsonb` flags.
 

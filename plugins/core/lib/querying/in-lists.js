@@ -10,7 +10,8 @@
 //
 // So a locking read on MariaDB sends a longer list as an OR of lists below the
 // server's threshold: the same rows, in one statement, read as one set of
-// ranges. getDatabaseInfo reads the threshold as the API starts.
+// ranges. getDatabaseInfo reads the threshold as the API starts, or at the first
+// call that reaches a database the start could not.
 
 /** @type {WeakMap<object, number>} each MariaDB connection configuration's longest IN list kept as a list */
 const longestLists = new WeakMap()

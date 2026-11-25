@@ -463,7 +463,8 @@ records, filtered by record and by revision number under a unique key on
 records. So on MariaDB every locking read the library sends (`lockByIds`,
 `lockWhere`, `claim`, a locking aggregate, a lock's link check and a write's
 lock of its targets) sends a longer list as an OR of lists below the server's
-threshold, which it reads as it starts
+threshold, which it reads as it starts, or at the first call that reaches a
+database that did not answer then
 (`api.knex.capabilities.dbInfo.inPredicateConversionThreshold`): the same
 rows, in one statement, read as ranges on the whole key. A list in a SELECT
 nested in the conditions (a row policy's subquery) is left as it is, and so is

@@ -327,7 +327,10 @@ owners of library writes. See [managed transactions](19-managed-transactions.md)
 and [transaction outcomes](20-transaction-outcomes.md) before composing operations.
 
 `api.knex.instance` exposes the supplied Knex instance and
-`api.knex.capabilities` describes detected backend capabilities. Table-backed
+`api.knex.capabilities` describes detected backend capabilities. The plugin
+observes them as it starts; if the database does not answer then, they read
+as unknown (`dbInfo.version` is `'unknown'` and `dbInfo.error` says why) and
+the next call that reaches the database observes them again. Table-backed
 resources provide `createKnexTable`, `introspectKnexTableSnapshot`,
 `generateKnexMigration`, `generateKnexMigrationDiff`, `addKnexFields` and
 `alterKnexFields`. These helpers have different applicability to canonical

@@ -7,7 +7,7 @@ import { createSchema } from 'json-rest-schema'
 import { createKnexTable, addKnexFields, alterKnexFields, generateKnexMigration, generateKnexMigrationDiff } from './lib/dbTablesOperations.js'
 import { introspectKnexTableSnapshot } from './lib/dbIntrospection.js'
 import { polymorphicFiltersHook, crossTableFiltersHook, basicFiltersHook } from './lib/querying/knex-query-helpers.js'
-import { getDatabaseCapabilities } from './lib/querying-writing/database-capabilities.js'
+import { getDatabaseCapabilities, observingCapabilities } from './lib/querying-writing/database-capabilities.js'
 import { createStorageAdapterLookup } from './lib/storage/storage-adapter.js'
 import { assertWritableKnexColumns } from './lib/storage/storage-mapping.js'
 import { assertFieldNameMap } from './lib/querying-writing/field-utils.js'
@@ -160,8 +160,11 @@ export const RestApiKnexPlugin = {
     /** @type {import('../../lib/transaction-types.js').TransactionFactory} */
     helpers.newTransaction = context => createKnexTransaction(knex, context)
 
-    Object.assign(helpers, createOrdinaryDataHelpers({ api, scopes, knex, log, getScopeStorageAdapter }))
-    Object.assign(helpers, createManyRowDataHelpers({ api, scopes, log, getScopeStorageAdapter }))
+    // Capabilities the start could not observe are observed again by the next call.
+    Object.assign(helpers, observingCapabilities({
+      ...createOrdinaryDataHelpers({ api, scopes, knex, log, getScopeStorageAdapter }),
+      ...createManyRowDataHelpers({ api, scopes, log, getScopeStorageAdapter })
+    }, api.knex.capabilities))
 
     log.info('RestApiKnexPlugin installed - basic CRUD operations ready')
   }

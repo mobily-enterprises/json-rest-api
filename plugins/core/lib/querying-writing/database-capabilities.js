@@ -73,6 +73,14 @@ export const RELATIONSHIP_CAPABILITIES = Object.freeze({
 })
 
 /**
+ * Capabilities whose version observation failed, as when an API starts before
+ * its database answers, are provisional: the next storage call observes again,
+ * and so on until an observation succeeds and they settle in place.
+ * @type {WeakMap<object, { knex: import('../storage/storage-types.js').StorageDatabase, log?: import('../storage/storage-types.js').CapabilityLogger, attempt: Promise<void> | null }>}
+ */
+const provisional = new WeakMap()
+
+/**
  * Both storage plugins share one version observation during initialization.
  * @param {import('../storage/storage-types.js').StorageDatabase} knex
  * @param {import('../storage/storage-types.js').CapabilityLogger} [log]
@@ -80,7 +88,7 @@ export const RELATIONSHIP_CAPABILITIES = Object.freeze({
  */
 export const getDatabaseCapabilities = async (knex, log) => {
   const dbInfo = await getDatabaseInfo(knex, log)
-  return {
+  const capabilities = {
     dbInfo,
     windowFunctions: await supportsWindowFunctions(knex, dbInfo),
     insertResult: getInsertResultMode(knex.client.config.client),
@@ -92,6 +100,60 @@ export const getDatabaseCapabilities = async (knex, log) => {
     },
     schema: getSchemaCapabilities(knex.client.config.client)
   }
+  if ('error' in dbInfo) provisional.set(capabilities, { knex, log, attempt: null })
+  return capabilities
+}
+
+/**
+ * Observes provisional capabilities again, through `db` when given (the
+ * caller's connection or transaction, so a pool of one connection is never
+ * waited on), and settles them in place once an observation succeeds. Callers
+ * meanwhile share one attempt; a failed one logs its error as the first did.
+ * @param {import('../storage/storage-types.js').DatabaseCapabilities} capabilities
+ * @param {import('../storage/storage-types.js').StorageDatabase} [db]
+ * @returns {Promise<void> | undefined} the attempt, or undefined once settled
+ */
+export function observeCapabilitiesAgain (capabilities, db) {
+  const pending = provisional.get(capabilities)
+  if (!pending) return undefined
+  pending.attempt ??= (async () => {
+    const source = db || pending.knex
+    const dbInfo = await getDatabaseInfo(source, pending.log)
+    if ('error' in dbInfo) return
+    capabilities.dbInfo = dbInfo
+    capabilities.windowFunctions = await supportsWindowFunctions(source, dbInfo)
+    provisional.delete(capabilities)
+    try {
+      await pending.log?.info?.('Database capabilities detected:', {
+        database: dbInfo.client, version: dbInfo.version, windowFunctions: capabilities.windowFunctions
+      })
+    } catch {}
+  })().finally(() => { pending.attempt = null })
+  return pending.attempt
+}
+
+/**
+ * A storage plugin's data helpers, each first observing provisional
+ * capabilities again through the database its call uses (`context.db`).
+ * @template {Record<string, unknown>} T
+ * @param {T} storageHelpers
+ * @param {import('../storage/storage-types.js').DatabaseCapabilities} capabilities
+ * @returns {T}
+ */
+export const observingCapabilities = (storageHelpers, capabilities) => {
+  /** @type {Record<string, any>} */
+  const observing = {}
+  for (const [name, helper] of Object.entries(storageHelpers)) {
+    if (typeof helper !== 'function') {
+      observing[name] = helper
+      continue
+    }
+    observing[name] = (/** @type {any[]} */ ...args) => {
+      const attempt = observeCapabilitiesAgain(capabilities, args[0]?.context?.db)
+      return attempt ? attempt.then(() => helper(...args)) : helper(...args)
+    }
+  }
+  return /** @type {T} */ (observing)
 }
 
 /**
