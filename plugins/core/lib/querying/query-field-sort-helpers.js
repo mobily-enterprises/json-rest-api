@@ -133,6 +133,11 @@ export const buildEffectiveSortList = (sort, { defaultSort, idField = 'id', sche
   return normalized
 }
 
+// MySQL and MariaDB put NULLs first in an ascending order and last in a
+// descending one. Only the other placement needs an `IS NULL` term, which keeps
+// an index from supplying the order.
+const mysqlPlacesNulls = (direction, nulls) => (String(direction).toLowerCase() === 'desc') === (nulls === 'last')
+
 export const applyQueryFieldOrder = (query, queryFieldRuntime, direction, nulls = 'last') => {
   if (['pg', 'postgresql'].includes(query.client.config.client)) {
     // The selected alias also avoids different bound parameter numbers under DISTINCT.
@@ -144,7 +149,9 @@ export const applyQueryFieldOrder = (query, queryFieldRuntime, direction, nulls 
     query.orderByRaw(`(${queryFieldRuntime.sql}) ${order} NULLS ${nulls === 'last' ? 'LAST' : 'FIRST'}`, queryFieldRuntime.bindings)
     return
   }
-  query.orderByRaw(`(${queryFieldRuntime.sql}) IS NULL ${nulls === 'last' ? 'ASC' : 'DESC'}`, queryFieldRuntime.bindings)
+  if (!mysqlPlacesNulls(direction, nulls)) {
+    query.orderByRaw(`(${queryFieldRuntime.sql}) IS NULL ${nulls === 'last' ? 'ASC' : 'DESC'}`, queryFieldRuntime.bindings)
+  }
   query.orderByRaw(`(${queryFieldRuntime.sql}) ${direction}`, queryFieldRuntime.bindings)
 }
 
@@ -156,7 +163,7 @@ export const applyColumnOrder = (query, column, direction, nulls = 'last') => {
     const order = String(direction).toLowerCase() === 'desc' ? 'DESC' : 'ASC'
     query.orderByRaw(`?? ${order} NULLS ${nulls === 'last' ? 'LAST' : 'FIRST'}`, [column])
   } else {
-    query.orderByRaw(`?? IS NULL ${nulls === 'last' ? 'ASC' : 'DESC'}`, [column])
+    if (!mysqlPlacesNulls(direction, nulls)) query.orderByRaw(`?? IS NULL ${nulls === 'last' ? 'ASC' : 'DESC'}`, [column])
     query.orderBy(column, direction)
   }
 }

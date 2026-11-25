@@ -52,8 +52,11 @@ sorts the matching rows. Other sort
 values keep the placement: nullable attributes, attributes with a setter,
 serializer or `nullOnEmpty`, relationship fields, query projections and AnyAPI
 attributes (a field added later leaves existing records' slots empty).
-PostgreSQL then reads only ascending sorts from a plain index; MariaDB, and
-MySQL on a nullable column, sort the matching rows.
+PostgreSQL then reads only ascending sorts from a plain index. MySQL and
+MariaDB put NULLs last in a descending order themselves, so they read a
+descending sort of such a column from a plain index, its `before` pages too;
+an ascending one sorts the matching rows on MariaDB, and on MySQL when the
+column is nullable.
 
 ## Default limits and numbered pages
 

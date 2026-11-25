@@ -550,13 +550,15 @@ locking read of your own Knex keeps its lists below the threshold itself.
 | 3.3.2 | 3.3.3 |
 | --- | --- |
 | the ID that breaks ties sorted ascending after every sort that did not name it: `['-sentOn']` read as `sentOn DESC, id ASC`, an order no plain index supplies, so a page of the newest rows sorted every matching row first | the ID takes the direction of the last sort key: `['-sentOn']` reads as `sentOn DESC, id DESC`, which an index ending with `(sentOn, id)` supplies read backward, for the first page and every cursor page |
+| on MySQL and MariaDB every sort of a value that may be NULL began with `sentOn IS NULL`, to put NULLs last, which kept an index from supplying the order, so a descending page of a nullable column sorted every matching row | the term is left out where the server already places NULLs as asked (a descending order, NULLs last; an ascending one, NULLs first, as a `before` page of a descending sort reads), so a descending sort of a nullable column reads from an index; an ascending sort keeps the term. NULLs still sort last in either direction on every database |
 
 Upgrading: rows that tie on a descending last sort key come in descending ID
 order, in `query`, `queryAll`, include orders and cursors; an ascending last
 key, and a sort that names the ID, order as before. Write `['-sentOn', 'id']` to
 keep the old order. A reader that pages through such ties across the upgrade
 continues from its cursor in the new order, so it can meet a tied row twice or
-miss one: start it again. A test that matches the SQL sees `id` desc.
+miss one: start it again. A test that matches the SQL sees `id` desc, and on
+MySQL and MariaDB no `is null` term in a descending sort.
 
 ## Custom storage plugins
 

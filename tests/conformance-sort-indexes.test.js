@@ -173,13 +173,18 @@ describe(`Indexed ordering and null placement (${storageMode.mode})`, () => {
     return statements.find(statement => / order by /i.test(statement.sql))
   }
 
-  for (const { subject, sort, filters, index, tableOnly } of [
+  for (const { subject, sort, filters, index, tableOnly, notPg } of [
     { subject: 'the ID', sort: ['-id'], index: storageMode.isAnyApi() ? 'any_records_tenant_resource_logical_id_unique' : 'PRIMARY' },
     { subject: 'the ID within an indexed filter', sort: ['-id'], filters: { name: 'Item 07' }, index: 'sort_conformance_name', tableOnly: true },
     { subject: 'a required indexed attribute', sort: ['-name', '-id'], index: 'sort_conformance_name', tableOnly: true },
-    { subject: 'a required indexed attribute with its ID implied', sort: ['-name'], index: 'sort_conformance_name', tableOnly: true }
+    { subject: 'a required indexed attribute with its ID implied', sort: ['-name'], index: 'sort_conformance_name', tableOnly: true },
+    // NULLs last is MySQL's and MariaDB's own descending placement, so they need no
+    // IS NULL term; PostgreSQL reads it only from an index declared DESC NULLS LAST.
+    { subject: 'a nullable indexed attribute', sort: ['-rank'], index: 'sort_conformance_rank', notPg: true }
   ]) {
-    it(`reads descending pages on ${subject} from an index`, { skip: tableOnly && storageMode.isAnyApi() && 'AnyAPI attribute slots keep their null placement' }, async () => {
+    const skip = (tableOnly && storageMode.isAnyApi() && 'AnyAPI attribute slots keep their null placement') ||
+      (notPg && databaseClient === 'pg' && 'PostgreSQL places NULLs last descending only from an index declared so')
+    it(`reads descending pages on ${subject} from an index`, { skip }, async () => {
       const boundary = createCursor(expectedOrder(sort).filter(row => !filters || row.name === filters.name)[1], sortFields(sort))
       for (const page of [{ size: 5 }, { size: 5, after: boundary }, { size: 5, before: boundary }]) {
         const plan = await explain(await pageStatement({ sort, ...(filters ? { filters } : {}), fields: { items: 'name' }, page }), index)
