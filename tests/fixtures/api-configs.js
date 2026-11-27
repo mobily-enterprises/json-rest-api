@@ -3715,3 +3715,44 @@ export async function registerBlobResource (knex, fields, { searchSchema } = {})
   await api.addResource('scans', { schema: { id: { type: 'id' }, ...fields }, ...(searchSchema ? { searchSchema } : {}), tableName: 'blob_scans' })
   return api
 }
+
+// The conformance groups, versioned, and items, beside `unrelated` versioned resources whose relationships reach only
+// each other: a write to an item advances groups' revisions and touches none of theirs.
+export async function createVersionedFanApi (knex, { storage = storageMode.mode, unrelated = 0 } = {}) {
+  const api = await createConformanceApi(knex, {
+    storage,
+    groupOptions: {
+      schema: { id: { type: 'id' }, name: { type: 'string', required: true }, revision: { type: 'string', required: true } },
+      versionField: 'revision'
+    }
+  })
+  for (let index = 0; index < unrelated; index += 1) {
+    const name = `shelves_${index}`
+    await api.addResource(name, {
+      schema: {
+        id: { type: 'id' },
+        revision: { type: 'string', required: true },
+        parentId: { type: 'id', belongsTo: name, as: 'parent', nullable: true }
+      },
+      relationships: { children: { type: 'hasMany', target: name, foreignKey: 'parentId' } },
+      versionField: 'revision',
+      tableName: `fan_${name}`
+    })
+    await api.resources[name].createKnexTable()
+    mapTable(knex, api, `fan_${name}`, name)
+  }
+  return api
+}
+
+// A second versioned parent of items, keyed by their groupId too, added to a running API: once it is, a write that moves
+// an item between groups advances the revisions of the teams with those ids as well.
+export async function addVersionedTeams (knex, api) {
+  await api.addResource('teams', {
+    schema: { id: { type: 'id' }, name: { type: 'string', required: true }, revision: { type: 'string', required: true } },
+    relationships: { items: { type: 'hasMany', target: 'items', foreignKey: 'groupId' } },
+    versionField: 'revision',
+    tableName: 'conformance_teams'
+  })
+  await api.resources.teams.createKnexTable()
+  mapTable(knex, api, 'conformance_teams', 'teams')
+}
