@@ -75,17 +75,16 @@ function buildFieldMapJsonSchemaFragment () {
   }
 }
 
-function buildKnownPageSchema () {
-  return createSchema({
-    number: { type: 'integer', min: 1 },
-    size: { type: 'integer', min: 1 },
-    limit: { type: 'integer', min: 1 },
-    offset: { type: 'integer', min: 0 },
-    after: { type: 'string', min: 1 },
-    before: { type: 'string', min: 1 },
-    cursor: { type: 'string' }
-  })
-}
+// The page parameters' schema depends on nothing, so every query checks its page with this one.
+const KNOWN_PAGE_SCHEMA = createSchema({
+  number: { type: 'integer', min: 1 },
+  size: { type: 'integer', min: 1 },
+  limit: { type: 'integer', min: 1 },
+  offset: { type: 'integer', min: 0 },
+  after: { type: 'string', min: 1 },
+  before: { type: 'string', min: 1 },
+  cursor: { type: 'string' }
+})
 
 function pickFirstError (errors = {}) {
   return Object.values(errors)[0] || null
@@ -300,7 +299,7 @@ function installRequestContractSupport () {
   addValidator('stringMapValues', stringMapValuesValidator)
 
   const pageParamsValidator = (context) => {
-    const pageSchema = buildKnownPageSchema()
+    const pageSchema = KNOWN_PAGE_SCHEMA
     const knownPageParams = {}
 
     for (const fieldName of Object.keys(pageSchema.structure)) {
@@ -331,7 +330,7 @@ function installRequestContractSupport () {
     }
   }
   pageParamsValidator.toJsonSchema = () => {
-    const pageSchema = buildKnownPageSchema().toJsonSchema({
+    const pageSchema = KNOWN_PAGE_SCHEMA.toJsonSchema({
       mode: 'patch',
       additionalProperties: false
     })
