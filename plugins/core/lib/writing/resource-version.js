@@ -47,7 +47,26 @@ async function readInverseReferences (state, context) {
     .where(adapter.getIdColumn(), adapter.translateFilterValue('id', context.id)).forUpdate().first(selection))
 }
 
+// Each API's inverse version references, by the resource whose writes advance them: found once per published schema,
+// so a write reads the references to its own resource, not every resource's relationships.
+const inverseReferenceIndexes = new WeakMap()
+
+/** A resource's schema was published, or a resource added or removed: the references are found again. */
+export function inverseVersionsChanged (api) {
+  inverseReferenceIndexes.delete(api)
+}
+
 function inverseVersionReferences (api, scopeName, scopeSchemaInfo) {
+  let index = inverseReferenceIndexes.get(api)
+  if (!index) inverseReferenceIndexes.set(api, (index = new Map()))
+  const known = index.get(scopeName)
+  if (known?.schemaInfo === scopeSchemaInfo) return known.references
+  const references = findInverseVersionReferences(api, scopeName, scopeSchemaInfo)
+  index.set(scopeName, { schemaInfo: scopeSchemaInfo, references })
+  return references
+}
+
+function findInverseVersionReferences (api, scopeName, scopeSchemaInfo) {
   const references = []
   for (const [parentType, parent] of Object.entries(api.resources)) {
     const schemaInfo = parent.vars.schemaInfo
@@ -64,7 +83,7 @@ function inverseVersionReferences (api, scopeName, scopeSchemaInfo) {
       } else if (relationship.foreignKey) references.push({ parentType, idField: relationship.foreignKey })
     }
   }
-  return references
+  return Object.freeze(references.map(reference => Object.freeze(reference)))
 }
 
 /**

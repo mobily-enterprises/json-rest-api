@@ -16,6 +16,7 @@ import { createStorageAdapterLookup } from './lib/storage/storage-adapter.js'
 import { translateCanonicalAttributesForStorage } from './lib/storage/canonical-storage-mapping.js'
 import { applyDatabaseReadOptions, normalizeStoredFieldValue } from './lib/querying-writing/database-value-normalizers.js'
 import { observingCapabilities } from './lib/querying-writing/database-capabilities.js'
+import { inverseVersionsChanged } from './lib/writing/resource-version.js'
 
 const DEFAULT_TENANT = 'default'
 const MIGRATION_BATCH_SIZE = 500
@@ -163,6 +164,7 @@ export const RestApiAnyapiKnexPlugin = {
         descriptor,
         canonicalFieldMap: descriptor.canonicalFieldMap,
       }
+      inverseVersionsChanged(api)
       getScopeStorageAdapter(scopeName)
       lastChecked.set(scopeName, Date.now())
     }
@@ -260,6 +262,7 @@ export const RestApiAnyapiKnexPlugin = {
             storageLoaded.delete(name)
             declarations.delete(name)
             delete api.resources[name]
+            inverseVersionsChanged(api)
             throw error
           }
           for (const target of after) await loadResource(target, nextChain)
