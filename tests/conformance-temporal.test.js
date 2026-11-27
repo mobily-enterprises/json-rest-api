@@ -465,6 +465,7 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
 
   it('rejects corrupt stored temporal values with field-specific typed errors', async () => {
     const event = await fixture.seed('events', { name: 'Corrupt' })
+    const fieldTypes = { day: 'date', occurredAt: 'dateTime', atTime: 'time', observedAtMs: 'epochMilliseconds' }
     for (const [field, raw] of [['day', '2024-02-30'], ['occurredAt', 'not-a-date'], ['atTime', '25:00'], ['observedAtMs', 'unsafe']]) {
       const rejected = databaseClient !== 'better-sqlite3' && (
         field === 'occurredAt' || field === 'observedAtMs' ||
@@ -485,6 +486,9 @@ describe(`Shared temporal conformance (${storageMode.mode})`, () => {
           assert.equal(error.code, 'REST_API_TEMPORAL_DATA_INVALID')
           assert.equal(error.details.field, field)
           assert.equal(error.details.resourceType, 'events')
+          assert.equal(error.details.fieldType, fieldTypes[field])
+          assert.equal(error.details.source, 'database')
+          assert.equal(error.message, `Invalid database value for ${fieldTypes[field]} field 'events.${field}'.`)
           return true
         })
       }
