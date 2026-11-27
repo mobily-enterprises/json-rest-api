@@ -15,6 +15,11 @@ const CACHED_TEMPORAL_TYPES = new Set(['date', 'dateTime', 'time', 'epochMillise
 // json-rest-schema's own checks for these types, which return the value unchanged: a value is checked with them
 // directly rather than through a schema per value. Epoch types cast as they check, so they keep their contract.
 const TEMPORAL_CHECKS = { date: isValidDate, dateTime: isValidDateTime, time: isValidTime }
+// What the database pass answered for each JSON:API resource it normalized: the output fields it used and a copy of
+// the attributes (a hook may change the object itself). See normalizeRecordAttributes.
+const databasePassAnswers = new WeakMap()
+// Fields whose value the database pass may leave for a getter to decode (see normalizeAttributes).
+const STRUCTURED_FIELD_TYPES = new Set(['object', 'array', 'file'])
 
 // How a read is sent: PostgreSQL's and MySQL's drivers return dates as text and
 // big integers exactly, and a locking read on MariaDB keeps each IN list below
@@ -396,11 +401,14 @@ const storedNumber = value => {
  *
  * @param {Object} attributes - The attributes object to normalize
  * @param {Object} schemaStructure - The schema structure defining field types
+ * @param {{ resourceType?: string, source?: string, answered?: Record<string, unknown> }} [options] `answered`: the
+ *   values the database pass answered for these attributes, which are already normalized (normalizeRecordAttributes)
  * @returns {Object} The normalized attributes object
  */
 export function normalizeAttributes (attributes, schemaStructure, {
   resourceType,
-  source = 'database'
+  source = 'database',
+  answered
 } = {}) {
   if (!attributes || !schemaStructure) {
     return attributes
@@ -414,6 +422,9 @@ export function normalizeAttributes (attributes, schemaStructure, {
 
     // Skip if no field definition found
     if (!fieldDef) continue
+    // A scalar the database pass answered for this field is normalized already; an object may have changed inside.
+    if (answered && typeof value !== 'object' && !STRUCTURED_FIELD_TYPES.has(fieldDef.type) &&
+        Object.hasOwn(answered, fieldName) && answered[fieldName] === value) continue
 
     if (['object', 'array'].includes(fieldDef.type)) {
       // A custom getter owns decoding its stored representation.
@@ -523,14 +534,19 @@ export function normalizeRecordAttributes (record, scopes, {
     const schemaInfo = scopes[entry?.type]?.vars?.schemaInfo
     if (!schemaInfo || !entry?.attributes) return
 
+    // The response pass normalizes again only what changed since the database pass (enrichers, getters, hooks):
+    // normalizing a value the database pass answered answers it unchanged.
+    const answered = source === 'response' ? databasePassAnswers.get(entry) : undefined
     entry.attributes = normalizeAttributes(
       entry.attributes,
       schemaInfo.outputFields,
       {
         resourceType: entry.type,
-        source
+        source,
+        answered: answered?.fields === schemaInfo.outputFields ? answered.values : undefined
       }
     )
+    if (source === 'database') databasePassAnswers.set(entry, { fields: schemaInfo.outputFields, values: { ...entry.attributes } })
   }
 
   // Normalize main data records
