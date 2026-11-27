@@ -247,6 +247,14 @@ describe(`Blob fields (${databaseClient})`, { skip: storageMode.isAnyApi() }, ()
     const { query } = await photos().scopedQuery({})
     const report = await query.select('*')
     assert.deepEqual(Object.keys(report[0]).filter(column => ['bytes', 'thumb'].includes(column)), [])
+
+    // Nor does one that names its columns: a blob among them is refused, before any statement.
+    const named = await statements(() => refused(photos().scopedQuery({ columns: ['id', 'code', 'thumb'] }), 'scoped_read', /'thumb' is a blob/))
+    assert.deepEqual(named, [])
+    const { query: codes } = await photos().scopedQuery({ alias: 'p', columns: ['id', 'code'] })
+    const rows = await codes.select('p.*').orderBy('p.id')
+    assert.deepEqual(rows.map(row => row.code), ['p1', 'p2', 'p3', 'p4'])
+    assert.ok(rows.every(row => Object.keys(row).sort().join() === 'code,id'), JSON.stringify(rows))
   })
 
   it('creates a binary column that holds maxBytes, and grows a smaller one on MySQL and MariaDB', async () => {
