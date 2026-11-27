@@ -1,4 +1,4 @@
-import { createSchema } from 'json-rest-schema'
+import { createSchema, isValidDate, isValidDateTime, isValidTime, resolveTemporalPrecision } from 'json-rest-schema'
 import { RestApiTemporalDataError, RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 import { filterResponseFields } from './field-utils.js'
 import { wrapUnexpectedError } from '../../../../lib/error-context.js'
@@ -12,6 +12,9 @@ const SQL_DATETIME_PATTERN = /^(\d{4}-\d{2}-\d{2}) ((?:[01]\d|2[0-3]):[0-5]\d:[0
 const INTEGER_VALUE_PATTERN = /^-?\d+$/
 const temporalContractCache = new Map()
 const CACHED_TEMPORAL_TYPES = new Set(['date', 'dateTime', 'time', 'epochMilliseconds', 'epochSeconds'])
+// json-rest-schema's own checks for these types, which return the value unchanged: a value is checked with them
+// directly rather than through a schema per value. Epoch types cast as they check, so they keep their contract.
+const TEMPORAL_CHECKS = { date: isValidDate, dateTime: isValidDateTime, time: isValidTime }
 
 // How a read is sent: PostgreSQL's and MySQL's drivers return dates as text and
 // big integers exactly, and a locking read on MariaDB keeps each IN list below
@@ -84,6 +87,14 @@ const validateTemporalJsonValue = (value, type, {
   resourceType,
   source
 } = {}) => {
+  const precision = Number.isInteger(temporalPrecision) ? temporalPrecision : undefined
+  // A precision on a date is an invalid declaration, which the contract refuses.
+  if (Object.hasOwn(TEMPORAL_CHECKS, type) && (type !== 'date' || precision === undefined)) {
+    if (!TEMPORAL_CHECKS[type](value, resolveTemporalPrecision({ temporalPrecision: precision }, 'value'))) {
+      throwTemporalDataError({ fieldName, resourceType, type, source })
+    }
+    return value
+  }
   const { validatedObject, errors } = getTemporalContract(type, temporalPrecision).patch({ value })
   if (Object.keys(errors).length > 0) {
     throwTemporalDataError({ fieldName, resourceType, type, source })
@@ -121,7 +132,7 @@ const parseKnownDatabaseDate = (value, { fieldName, resourceType, type, source }
 
   const trimmed = value.trim()
   const sqlMatch = SQL_DATETIME_PATTERN.exec(trimmed)
-  const rfc3339Match = RFC3339_DATETIME_PATTERN.exec(trimmed)
+  const rfc3339Match = sqlMatch ? null : RFC3339_DATETIME_PATTERN.exec(trimmed)
   let dateTimeValue = null
   let offsetSeconds = 0
 
