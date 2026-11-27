@@ -192,13 +192,17 @@ reports that `aggregate` cannot express, and as a subquery.
 The builder selects from a derived table, `(SELECT alias.* FROM table AS alias
 WHERE …) AS alias`, so conditions you add, `orWhere` and `whereRaw('a OR b')`
 included, can only narrow the scoped rows. Refer to columns as `alias.column`
-or by bare name.
+or by bare name. The derived table carries every column but the blobs, or only
+the fields `columns` names: a subquery that reads a few columns (an `EXISTS`
+over another table, say) names them, and the database plans the derived table
+it reads, which is then that one select list over the table and no wider.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `filters` | | Search filters, validated as `query` validates them |
 | `alias` | the table name | Table alias for your column references |
 | `purpose` | `'report'` | `'report'` includes shared rows; `'bulk-write'`, `'lock'` and `'claim'` do not. Row policies receive it as `queryPurpose` |
+| `columns` | every column but the blobs | The fields the derived table selects: `id` and the resource's stored fields, each once. A name that is not one (a relationship, a virtual or computed field), a field named twice, a blob, or an empty list is refused as a `RestApiValidationError` on `columns` or `columns.<index>`, before any statement |
 | `transaction` | | Knex transaction to read in |
 
 ```js
@@ -208,6 +212,9 @@ const totals = await query
   .select('a.name')
   .sum({ total: 'e.amount' })
   .groupBy('a.name')
+
+const { query: open } = await api.resources.entries.scopedQuery({ alias: 'e', columns: ['id', 'account_id'], filters: { status: 'open' } }, context)
+const withOpenEntries = await knex('accounts as a').whereExists(open.select('e.id').whereColumn('e.account_id', 'a.id'))
 ```
 
 The caller needs `query` permission on the resource. The builder is

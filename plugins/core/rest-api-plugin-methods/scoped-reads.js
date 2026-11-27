@@ -21,14 +21,41 @@ const MAX_LOCK_WHERE = 1000
 const invalid = (field, message) => new RestApiValidationError(message, { fields: [field], violations: [{ field, rule: 'scoped_read', message }] })
 
 /**
+ * The fields a scopedQuery's `columns` names, checked against the resource's
+ * schema: `id` and stored fields, each once, never a blob.
+ * @param {unknown} columns
+ * @param {any} schemaInfo
+ * @param {string} scopeName
+ * @returns {string[]}
+ */
+function scopedColumnFields (columns, schemaInfo, scopeName) {
+  if (!Array.isArray(columns) || !columns.length) throw invalid('columns', 'columns must name at least one field')
+  const schema = schemaInfo.schemaStructure || {}
+  const named = new Set()
+  return columns.map((field, index) => {
+    const definition = typeof field === 'string' && Object.hasOwn(schema, field) ? schema[field] : undefined
+    if (field !== 'id' && !definition) throw invalid(`columns.${index}`, `'${String(field)}' is not a field of ${scopeName}`)
+    if (definition?.type === 'blob') throw invalid(`columns.${index}`, `'${field}' is a blob: a scoped read reads no blob`)
+    if (definition && (definition.virtual || definition.computed || definition.belongsToPolymorphic)) {
+      throw invalid(`columns.${index}`, `'${field}' is not a stored field of ${scopeName}`)
+    }
+    if (named.has(field)) throw invalid(`columns.${index}`, `'${field}' is named twice`)
+    named.add(field)
+    return /** @type {string} */ (field)
+  })
+}
+
+/**
  * The resource's table with ownership and row policy applied, as a read-only
  * Knex builder over a derived table named after the alias (or the table), so
- * nothing a caller adds, `orWhere` included, can widen the scope. Resolves to
- * `{ query }`: a builder is thenable, so returning it from an async method would run it.
+ * nothing a caller adds, `orWhere` included, can widen the scope. The derived
+ * table selects the fields `columns` names, or every column but the blobs.
+ * Resolves to `{ query }`: a builder is thenable, so returning it from an async
+ * method would run it.
  * @param {any} args
  */
 export async function scopedQueryMethod ({ params, context, vars, helpers, scope, scopes, runHooks, scopeName, api }) {
-  const { transaction, alias, purpose = 'report', filters, ...unknown } = params
+  const { transaction, alias, purpose = 'report', filters, columns, ...unknown } = params
   if (Object.keys(unknown).length) throw invalid(Object.keys(unknown)[0], `Unknown scopedQuery options: ${Object.keys(unknown).join(', ')}`)
   if (!SCOPED_QUERY_PURPOSES.has(purpose)) throw invalid('purpose', `purpose must be one of ${[...SCOPED_QUERY_PURPOSES].join(', ')}`)
   if (alias !== undefined && (typeof alias !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias))) {
@@ -42,13 +69,17 @@ export async function scopedQueryMethod ({ params, context, vars, helpers, scope
   context.schemaInfo = scopes[scopeName].vars.schemaInfo
   context.transaction = transaction
   context.db = transaction
+  const fields = columns === undefined ? undefined : scopedColumnFields(columns, context.schemaInfo, scopeName)
   context.queryParams = { filters: validateFilters({ filters, scopeName, schemaInfo: context.schemaInfo, vars }) || {} }
   // A caller who may not query the resource may not build reports on it either.
   await scope.checkPermissions({ method: 'query', originalContext: { ...context, method: 'query', scopedQuery: true } })
   const { query, alias: name } = await helpers.dataScopedQuery({ scopeName, context, runHooks, alias, purpose, filters: context.queryParams.filters })
-  // A report reads no blob: the derived table carries every other column.
-  const columns = columnsWithoutBlobs(context.schemaInfo, helpers.getStorageAdapter(scopeName), name)
-  const derived = (transaction || api.knex.instance).from(query.select(columns).as(name))
+  // A report reads no blob: the derived table carries the named fields, or every column but the blobs.
+  const storageAdapter = helpers.getStorageAdapter(scopeName)
+  const selected = fields
+    ? fields.map(field => `${name}.${field === 'id' ? storageAdapter.getIdColumn() : storageAdapter.translateColumn(field)}`)
+    : columnsWithoutBlobs(context.schemaInfo, storageAdapter, name)
+  const derived = (transaction || api.knex.instance).from(query.select(selected).as(name))
   return { query: readOnlyQueryBuilder(derived, { resourceType: scopeName }) }
 }
 

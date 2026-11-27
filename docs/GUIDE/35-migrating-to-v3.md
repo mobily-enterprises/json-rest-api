@@ -571,6 +571,20 @@ reads `dbInfo.version` as `'unknown'`, with `dbInfo.error`, until a call
 reaches the database. A blob resource registered while the capabilities were
 unknown was not checked against `max_allowed_packet`, and is not checked later.
 
+## Columns of a scoped read's derived table (3.4.0)
+
+| 3.3.x | 3.4.0 |
+| --- | --- |
+| a `scopedQuery`'s derived table carried every column but the blobs, so a caller that reads a few of them (a join source, an `EXISTS` over another table) wrapped it in a derived table of its own to narrow it, and the database planned two derived tables for each such subquery: MariaDB 11.4 planned a row policy with 88 of them for 19 ms against 3 ms to run it, and could not turn its `EXISTS` into semi-joins | `scopedQuery({ columns })` names the fields the derived table selects: `id` and the resource's stored fields, each once, never a blob. The builder stays one derived table, scoped as before, so conditions a caller adds, `orWhere` included, still only narrow it |
+
+Upgrading: nothing changes until a call passes `columns`. A name that is not
+a stored field of the resource (a relationship, a virtual or computed field,
+anything not a string), a field named twice, a blob, an empty list or a value
+that is not a list is refused as a `RestApiValidationError` on `columns` or
+`columns.<index>` (rule `scoped_read`), before any statement. A caller that
+wrapped the builder to narrow its columns passes them instead and refers to
+the same `alias.column` names.
+
 ## Custom storage plugins
 
 The storage helpers gain `dataScopedQuery`, `dataVisibleIds`, `dataIdsByKeys`,

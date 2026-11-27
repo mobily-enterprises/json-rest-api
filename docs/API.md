@@ -1317,7 +1317,7 @@ canonical rows, whose fields live in storage slots.
 
 ```javascript
 const { query } = await api.resources.entries.scopedQuery(
-  { filters, alias, purpose, transaction }, context)
+  { filters, alias, purpose, columns, transaction }, context)
 ```
 
 Resolves to `{ query }`, a Knex builder over a derived table of the resource's
@@ -1325,7 +1325,11 @@ rows with ownership filters, row policy and the search `filters` applied, so
 conditions the caller adds (`orWhere` included) only narrow them. It is wrapped
 because a builder is thenable. `purpose` is `'report'` (default; includes
 shared rows), `'bulk-write'`, `'lock'` or `'claim'`; row policies receive it as
-`queryPurpose`. The caller needs `query` permission. The builder refuses
+`queryPurpose`. The derived table carries every column but the blobs, or only
+the fields `columns` names (`id` and stored fields, each once): a name that is
+no stored field, a field named twice, a blob or an empty list is a
+`RestApiValidationError` before any statement. The caller needs `query`
+permission. The builder refuses
 writes, locking reads, table changes, clearing predicates, set operations,
 common table expressions and access to its Knex client, on clones too
 (`RestApiScopedQueryReadOnlyError`); joined tables are not scoped. It guards
