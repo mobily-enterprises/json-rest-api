@@ -152,24 +152,25 @@ describe(`System context, shared rows, scopedQuery and queryAll (${storageMode.m
     const adapter = fixture.api.knex.helpers.getStorageAdapter('da_entries')
     const stored = field => field === 'id' ? adapter.getIdColumn() : adapter.translateColumn(field)
     const named = ['id', 'code', 'amount']
-    const scoped = async (params = {}, context = workspaceA()) => (await entries.scopedQuery({ alias: 'e', columns: named, ...params }, context)).query
+    // Resolves to { query }: a builder is thenable, so an async function answering one would run it.
+    const scoped = (params = {}, context = workspaceA()) => entries.scopedQuery({ alias: 'e', columns: named, ...params }, context)
     const codes = async query => (await query.select({ code: `e.${stored('code')}` }).orderBy(`e.${stored('id')}`)).map(row => row.code)
 
     // The named columns are the derived table's select list: no layer more than without them.
     const selects = query => query.clone().select(`e.${stored('id')}`).toSQL().sql.match(/\bselect\b/gi).length
     const everyColumn = (await entries.scopedQuery({ alias: 'e' }, workspaceA())).query
-    const query = await scoped()
+    const { query } = await scoped()
     assert.equal(selects(query), selects(everyColumn))
     const rows = await query.select('e.*').orderBy(`e.${stored('id')}`)
     assert.deepEqual(rows.map(row => Object.keys(row).sort()), rows.map(() => named.map(stored).sort()))
     assert.deepEqual(rows.map(row => String(row[stored('id')])), ['1', '2', '3'])
 
     // Ownership, the row policy and the filters apply as without columns, and an orWhere only narrows.
-    assert.deepEqual(await codes(await scoped({ filters: { amount: 20 } })), ['E2'])
-    assert.deepEqual(await codes(await scoped({}, createSystemContext('totals'))), ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9'])
-    const widened = (await scoped()).where(`e.${stored('amount')}`, '>', 10).orWhere(`e.${stored('code')}`, 'E7')
+    assert.deepEqual(await codes((await scoped({ filters: { amount: 20 } })).query), ['E2'])
+    assert.deepEqual(await codes((await scoped({}, createSystemContext('totals'))).query), ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9'])
+    const widened = (await scoped()).query.where(`e.${stored('amount')}`, '>', 10).orWhere(`e.${stored('code')}`, 'E7')
     assert.deepEqual(await codes(widened), ['E2', 'E3'])
-    assert.deepEqual(await codes((await scoped()).whereRaw('1 = 0').orWhereRaw('1 = 1')), ['E1', 'E2', 'E3'])
+    assert.deepEqual(await codes((await scoped()).query.whereRaw('1 = 0').orWhereRaw('1 = 1')), ['E1', 'E2', 'E3'])
   })
 
   it('refuses columns that name no stored field, a field twice or nothing, before any statement', async () => {
