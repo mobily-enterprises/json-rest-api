@@ -2,7 +2,9 @@
 // Single patch, put and delete find their row with a scoped read first, on
 // table and AnyAPI storage alike. Their UPDATE or DELETE repeats the owner that
 // read recorded, and its own row count tells whether the row has gone or moved
-// to another owner since.
+// to another owner since. A patch or delete that nothing reads the row for
+// sends no read: its statement carries the caller's scope instead (`scope`,
+// see storedRowRead), and its count tells whether the caller may write the row.
 import { RestApiResourceError } from '../../../../lib/rest-api-errors.js'
 import { ERROR_SUBTYPES } from '../querying-writing/knex-constants.js'
 import { applyWriteConditions } from '../querying/query-constraint.js'
@@ -21,39 +23,43 @@ const resourceNotFound = (scopeName, id) => new RestApiResourceError('Resource n
 /**
  * The row a single write found with its scoped read: `byId` looks it up, and
  * the owner that read recorded is added, so a row that has gone or moved to
- * another owner since is not matched.
- * @param {{ byId: () => any, context: any, scopeName: string, storageAdapter: import('./storage-types.js').StorageAdapter, tableName: string }} target
+ * another owner since is not matched. With `scope`, a query of the ids the
+ * caller may write (recordScope), the statement finds the row itself, in that scope.
+ * @param {{ byId: () => any, context: any, scopeName: string, storageAdapter: import('./storage-types.js').StorageAdapter, tableName: string, scope?: any }} target
  * @returns {() => any}
  */
-export const foundRow = ({ byId, context, scopeName, storageAdapter, tableName }) => () =>
-  applyWriteConditions({ query: byId(), context, scopeName, storageAdapter, tableName })
+export const foundRow = ({ byId, context, scopeName, storageAdapter, tableName, scope }) => () => {
+  const query = applyWriteConditions({ query: byId(), context, scopeName, storageAdapter, tableName })
+  return scope ? query.whereIn(`${tableName}.${storageAdapter.getIdColumn()}`, scope) : query
+}
 
 /**
  * Locks the row a single write found; not found when it has gone or moved.
+ * `notFound` makes the error (a patch's own, when its UPDATE finds the row).
  * @param {() => any} row
- * @param {{ scopeName: string, id: string | number, idColumn: string }} target
+ * @param {{ scopeName: string, id: string | number, idColumn: string, notFound?: (scopeName: string, id: string | number) => Error }} target
  */
-export async function lockFoundRow (row, { scopeName, id, idColumn }) {
-  if (!await row().select(idColumn).forUpdate().first()) throw resourceNotFound(scopeName, id)
+export async function lockFoundRow (row, { scopeName, id, idColumn, notFound = resourceNotFound }) {
+  if (!await row().select(idColumn).forUpdate().first()) throw notFound(scopeName, id)
 }
 
 /**
  * Updates the row a single write found, or, with nothing stored to change,
  * locks it. Not found when it has gone or moved.
  * @param {() => any} row
- * @param {{ db: any, scopeName: string, id: string | number, idColumn: string, values: Record<string, unknown> }} update
+ * @param {{ db: any, scopeName: string, id: string | number, idColumn: string, values: Record<string, unknown>, notFound?: (scopeName: string, id: string | number) => Error }} update
  * @returns {Promise<number>} The rows the UPDATE counted
  */
-export async function updateFoundRow (row, { db, scopeName, id, idColumn, values }) {
+export async function updateFoundRow (row, { db, scopeName, id, idColumn, values, notFound = resourceNotFound }) {
   if (!Object.keys(values).length) {
-    await lockFoundRow(row, { scopeName, id, idColumn })
+    await lockFoundRow(row, { scopeName, id, idColumn, notFound })
     return 0
   }
   const counted = await row().update(values)
   if (counted) return counted
   // MySQL without FOUND_ROWS counts the rows an UPDATE changed: an unchanged row counts zero.
-  if (await countsMatchedRows(db)) throw resourceNotFound(scopeName, id)
-  await lockFoundRow(row, { scopeName, id, idColumn })
+  if (await countsMatchedRows(db)) throw notFound(scopeName, id)
+  await lockFoundRow(row, { scopeName, id, idColumn, notFound })
   return 0
 }
 

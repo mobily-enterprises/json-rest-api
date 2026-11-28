@@ -99,9 +99,10 @@ export function createCanonicalDataHelpers ({
     return descriptors
   }
 
-  // The canonical row of the record a single write found with its scoped read.
-  /** @param {string} scopeName @param {{ db: import('./storage-types.js').StorageDatabase, id: string | number }} context */
-  const foundRecord = (scopeName, context) => {
+  // The canonical row of the record a single write found with its scoped read,
+  // or, with `scope`, finds in the caller's scope itself.
+  /** @param {string} scopeName @param {{ db: import('./storage-types.js').StorageDatabase, id: string | number }} context @param {any} [scope] */
+  const foundRecord = (scopeName, context, scope) => {
     const storageAdapter = getScopeStorageAdapter(scopeName)
     if (!storageAdapter) throw new Error(`Storage adapter for resource '${scopeName}' not found`)
     const descriptor = getDescriptor(scopeName)
@@ -114,7 +115,8 @@ export function createCanonicalDataHelpers ({
       context,
       scopeName,
       storageAdapter,
-      tableName: canonical.tableName
+      tableName: canonical.tableName,
+      scope
     })
   }
 
@@ -219,7 +221,7 @@ export function createCanonicalDataHelpers ({
   }
 
   /** @type {CanonicalDataWriteHelpers['dataPatch']} */
-  const dataPatch = async ({ scopeName, context }) => {
+  const dataPatch = async ({ scopeName, context, scope, notFound }) => {
     const storageAdapter = getScopeStorageAdapter(scopeName)
     if (storageAdapter) {
       context.storageAdapter = storageAdapter
@@ -236,18 +238,18 @@ export function createCanonicalDataHelpers ({
       Object.entries(row).filter(([, value]) => value !== undefined)
     )
 
-    return updateFoundRow(foundRecord(scopeName, context), { db: context.db, scopeName, id, idColumn: logicalIdColumn, values: updateRow })
+    return updateFoundRow(foundRecord(scopeName, context, scope), { db: context.db, scopeName, id, idColumn: logicalIdColumn, values: updateRow, notFound })
   }
 
   /** @type {CanonicalDataWriteHelpers['dataDelete']} */
-  const dataDelete = async ({ scopeName, context }) => {
+  const dataDelete = async ({ scopeName, context, scope }) => {
     const storageAdapter = getScopeStorageAdapter(scopeName)
     if (storageAdapter) {
       context.storageAdapter = storageAdapter
     }
     const descriptor = getDescriptor(scopeName)
     const id = context.id
-    const row = foundRecord(scopeName, context)
+    const row = foundRecord(scopeName, context, scope)
 
     const idColumn = getCanonicalResourceIdColumn(descriptor)
     await linkStore.invalidateDeletedLinkTargets(scopeName, context, () => lockFoundRow(row, { scopeName, id, idColumn }))
@@ -372,6 +374,10 @@ export function createCanonicalDataHelpers ({
       return records.map(row => idsOnly ? { type: descriptor.resource, id: requireCanonicalResourceId(row, descriptor) } : toMinimal(row))
     }
     if (locked && databaseFamily(context.db) === 'mysql') query.forShare()
+    if (idsOnly) {
+      const found = await applyDatabaseReadOptions(query.select(`${canonical.tableName}.${logicalIdColumn}`)).first()
+      return found ? { type: descriptor.resource, id: requireCanonicalResourceId(found, descriptor) } : null
+    }
     const row = await applyDatabaseReadOptions(query.select(`${canonical.tableName}.*`)).first()
     return row ? toMinimal(row) : null
   }
