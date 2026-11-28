@@ -21,14 +21,17 @@ const deleted = await items.deleteMany({ ids: [1], returning: 'minimal' })
 const deletedId: string | undefined = deleted.data[0]?.id
 await items.deleteWhere({ filters: { name: 'Old' } })
 const { query } = await items.scopedQuery({ alias: 'i', purpose: 'report' })
+const { query: named } = await items.scopedQuery({ alias: 'i', columns: ['id', 'name'] })
 const all = await items.queryAll({ pageSize: 500, rowLimit: 10000 })
 const allNames: Array<string | undefined> = all.data.map(item => item.name)
 const locked = await items.lockByIds({ ids: [1, 2], transaction: raw })
 const lockedWhere = await items.lockWhere({ filters: { name: 'First' }, transaction })
 const claimed = await items.claim({ filters: { name: 'queued' }, sort: ['-rank'], limit: 10, transaction })
 const lockedTotals = await items.aggregate({ measures: { rows: { count: '*' }, ranks: { sum: 'rank' } }, queryParams: { filters: { name: 'First' } }, lockMode: 'share', transaction })
-void [nothing, createdName, upsertedId, patchedName, deletedId, query, allNames, locked, lockedWhere, claimed, lockedTotals.data[0]]
+void [nothing, createdName, upsertedId, patchedName, deletedId, query, named, allNames, locked, lockedWhere, claimed, lockedTotals.data[0]]
 
+// @ts-expect-error A scoped read's columns name at least one field.
+await items.scopedQuery({ columns: [] })
 // @ts-expect-error A locking aggregate takes a lock read's lock modes.
 await items.aggregate({ measures: { rows: { count: '*' } }, lockMode: 'exclusive', transaction })
 // @ts-expect-error Many-row writes need a managed transaction from api.transaction.

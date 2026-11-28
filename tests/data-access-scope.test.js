@@ -145,6 +145,57 @@ describe(`System context, shared rows, scopedQuery and queryAll (${storageMode.m
     await assert.rejects(entries.scopedQuery({ purpose: 'delete' }, workspaceA()), error => cause(error) instanceof RestApiValidationError)
   })
 
+  it('selects the columns it names from one derived table, scoped as before', async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    // On AnyAPI the fields live in storage slots: the derived table names each by its storage column.
+    const adapter = fixture.api.knex.helpers.getStorageAdapter('da_entries')
+    const stored = field => field === 'id' ? adapter.getIdColumn() : adapter.translateColumn(field)
+    const named = ['id', 'code', 'amount']
+    // Resolves to { query }: a builder is thenable, so an async function answering one would run it.
+    const scoped = (params = {}, context = workspaceA()) => entries.scopedQuery({ alias: 'e', columns: named, ...params }, context)
+    const codes = async query => (await query.select({ code: `e.${stored('code')}` }).orderBy(`e.${stored('id')}`)).map(row => row.code)
+
+    // The named columns are the derived table's select list: no layer more than without them.
+    const selects = query => query.clone().select(`e.${stored('id')}`).toSQL().sql.match(/\bselect\b/gi).length
+    const everyColumn = (await entries.scopedQuery({ alias: 'e' }, workspaceA())).query
+    const { query } = await scoped()
+    assert.equal(selects(query), selects(everyColumn))
+    const rows = await query.select('e.*').orderBy(`e.${stored('id')}`)
+    assert.deepEqual(rows.map(row => Object.keys(row).sort()), rows.map(() => named.map(stored).sort()))
+    assert.deepEqual(rows.map(row => String(row[stored('id')])), ['1', '2', '3'])
+
+    // Ownership, the row policy and the filters apply as without columns, and an orWhere only narrows.
+    assert.deepEqual(await codes((await scoped({ filters: { amount: 20 } })).query), ['E2'])
+    assert.deepEqual(await codes((await scoped({}, createSystemContext('totals'))).query), ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9'])
+    const widened = (await scoped()).query.where(`e.${stored('amount')}`, '>', 10).orWhere(`e.${stored('code')}`, 'E7')
+    assert.deepEqual(await codes(widened), ['E2', 'E3'])
+    assert.deepEqual(await codes((await scoped()).query.whereRaw('1 = 0').orWhereRaw('1 = 1')), ['E1', 'E2', 'E3'])
+  })
+
+  it('refuses columns that name no stored field, a field twice or nothing, before any statement', async () => {
+    await seedLedger(fixture)
+    const entries = fixture.api.resources.da_entries
+    const refusedBefore = async (columns, field, pattern) => {
+      const measured = await fixture.measure(() => assert.rejects(entries.scopedQuery({ columns }, workspaceA()), error => {
+        const refusal = cause(error)
+        assert.ok(refusal instanceof RestApiValidationError, error?.stack)
+        assert.deepEqual(refusal.details.fields, [field])
+        assert.equal(refusal.details.violations[0].rule, 'scoped_read')
+        assert.match(refusal.message, pattern)
+        return true
+      }))
+      assert.equal(measured.statements, 0, measured.sql.join(' | '))
+    }
+    await refusedBefore(['id', 'nope'], 'columns.1', /'nope' is not a field of da_entries/)
+    // A relationship is no column of the table.
+    await refusedBefore(['labels'], 'columns.0', /'labels' is not a field of da_entries/)
+    await refusedBefore(['code', 'amount', 'code'], 'columns.2', /'code' is named twice/)
+    await refusedBefore([7], 'columns.0', /'7' is not a field of da_entries/)
+    await refusedBefore([], 'columns', /columns must name at least one field/)
+    await refusedBefore('code', 'columns', /columns must name at least one field/)
+  })
+
   it('serves reports, aliases and subqueries from the scoped builder', { skip: storageMode.isAnyApi() && 'canonical rows store fields in slots' }, async () => {
     await seedLedger(fixture)
     const entries = fixture.api.resources.da_entries

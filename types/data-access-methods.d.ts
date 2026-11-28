@@ -72,6 +72,8 @@ export interface ScopedQueryParams {
   // report (default) sees shared rows; bulk-write, lock and claim see only the owner's.
   purpose?: 'report' | 'bulk-write' | 'lock' | 'claim'
   filters?: Record<string, unknown>
+  // The fields the derived table selects (id and stored fields, each once, no blob); default every column but the blobs.
+  columns?: readonly [string, ...string[]]
 }
 // A Knex builder over a derived table of the scoped rows. It refuses writes, locks,
 // table changes, set operations, common table expressions and access to the client.

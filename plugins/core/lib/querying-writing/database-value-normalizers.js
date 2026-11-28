@@ -1,4 +1,4 @@
-import { createSchema } from 'json-rest-schema'
+import { createSchema, isValidDate, isValidDateTime, isValidTime, resolveTemporalPrecision } from 'json-rest-schema'
 import { RestApiTemporalDataError, RestApiValidationError } from '../../../../lib/rest-api-errors.js'
 import { filterResponseFields } from './field-utils.js'
 import { wrapUnexpectedError } from '../../../../lib/error-context.js'
@@ -12,6 +12,14 @@ const SQL_DATETIME_PATTERN = /^(\d{4}-\d{2}-\d{2}) ((?:[01]\d|2[0-3]):[0-5]\d:[0
 const INTEGER_VALUE_PATTERN = /^-?\d+$/
 const temporalContractCache = new Map()
 const CACHED_TEMPORAL_TYPES = new Set(['date', 'dateTime', 'time', 'epochMilliseconds', 'epochSeconds'])
+// json-rest-schema's own checks for these types, which return the value unchanged: a value is checked with them
+// directly rather than through a schema per value. Epoch types cast as they check, so they keep their contract.
+const TEMPORAL_CHECKS = { date: isValidDate, dateTime: isValidDateTime, time: isValidTime }
+// What the database pass answered for each JSON:API resource it normalized: the output fields it used and a copy of
+// the attributes (a hook may change the object itself). See normalizeRecordAttributes.
+const databasePassAnswers = new WeakMap()
+// Fields whose value the database pass may leave for a getter to decode (see normalizeAttributes).
+const STRUCTURED_FIELD_TYPES = new Set(['object', 'array', 'file'])
 
 // How a read is sent: PostgreSQL's and MySQL's drivers return dates as text and
 // big integers exactly, and a locking read on MariaDB keeps each IN list below
@@ -84,6 +92,14 @@ const validateTemporalJsonValue = (value, type, {
   resourceType,
   source
 } = {}) => {
+  const precision = Number.isInteger(temporalPrecision) ? temporalPrecision : undefined
+  // A precision on a date is an invalid declaration, which the contract refuses.
+  if (Object.hasOwn(TEMPORAL_CHECKS, type) && (type !== 'date' || precision === undefined)) {
+    if (!TEMPORAL_CHECKS[type](value, resolveTemporalPrecision({ temporalPrecision: precision }, 'value'))) {
+      throwTemporalDataError({ fieldName, resourceType, type, source })
+    }
+    return value
+  }
   const { validatedObject, errors } = getTemporalContract(type, temporalPrecision).patch({ value })
   if (Object.keys(errors).length > 0) {
     throwTemporalDataError({ fieldName, resourceType, type, source })
@@ -121,7 +137,7 @@ const parseKnownDatabaseDate = (value, { fieldName, resourceType, type, source }
 
   const trimmed = value.trim()
   const sqlMatch = SQL_DATETIME_PATTERN.exec(trimmed)
-  const rfc3339Match = RFC3339_DATETIME_PATTERN.exec(trimmed)
+  const rfc3339Match = sqlMatch ? null : RFC3339_DATETIME_PATTERN.exec(trimmed)
   let dateTimeValue = null
   let offsetSeconds = 0
 
@@ -385,11 +401,14 @@ const storedNumber = value => {
  *
  * @param {Object} attributes - The attributes object to normalize
  * @param {Object} schemaStructure - The schema structure defining field types
+ * @param {{ resourceType?: string, source?: string, answered?: Record<string, unknown> }} [options] `answered`: the
+ *   values the database pass answered for these attributes, which are already normalized (normalizeRecordAttributes)
  * @returns {Object} The normalized attributes object
  */
 export function normalizeAttributes (attributes, schemaStructure, {
   resourceType,
-  source = 'database'
+  source = 'database',
+  answered
 } = {}) {
   if (!attributes || !schemaStructure) {
     return attributes
@@ -403,6 +422,9 @@ export function normalizeAttributes (attributes, schemaStructure, {
 
     // Skip if no field definition found
     if (!fieldDef) continue
+    // A scalar the database pass answered for this field is normalized already; an object may have changed inside.
+    if (answered && typeof value !== 'object' && !STRUCTURED_FIELD_TYPES.has(fieldDef.type) &&
+        Object.hasOwn(answered, fieldName) && answered[fieldName] === value) continue
 
     if (['object', 'array'].includes(fieldDef.type)) {
       // A custom getter owns decoding its stored representation.
@@ -512,14 +534,19 @@ export function normalizeRecordAttributes (record, scopes, {
     const schemaInfo = scopes[entry?.type]?.vars?.schemaInfo
     if (!schemaInfo || !entry?.attributes) return
 
+    // The response pass normalizes again only what changed since the database pass (enrichers, getters, hooks):
+    // normalizing a value the database pass answered answers it unchanged.
+    const answered = source === 'response' ? databasePassAnswers.get(entry) : undefined
     entry.attributes = normalizeAttributes(
       entry.attributes,
       schemaInfo.outputFields,
       {
         resourceType: entry.type,
-        source
+        source,
+        answered: answered?.fields === schemaInfo.outputFields ? answered.values : undefined
       }
     )
+    if (source === 'database') databasePassAnswers.set(entry, { fields: schemaInfo.outputFields, values: { ...entry.attributes } })
   }
 
   // Normalize main data records
