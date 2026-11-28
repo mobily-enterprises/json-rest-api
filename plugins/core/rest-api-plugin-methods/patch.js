@@ -19,7 +19,9 @@ import {
   handleRecordReturnAfterWrite,
   handleWriteMethodError,
   commitOwnedTransaction,
-  keepHiddenLinks
+  keepHiddenLinks,
+  recordScope,
+  storedRowRead
 } from './common.js'
 
 /**
@@ -81,22 +83,33 @@ export default async function patchMethod ({
       isPartialValidation: true
     })
 
-    // Fetch minimal record for authorization checks
-    const minimalRecord = await helpers.dataGetMinimal({
-      scopeName,
-      context,
-      runHooks
-    })
-
-    if (!minimalRecord) {
-      throw new RestApiResourceError(
-        `Resource not found: ${scopeName}/${context.id}`,
-        { subtype: ERROR_SUBTYPES.NOT_FOUND }
-      )
+    const notFound = () => new RestApiResourceError(
+      `Resource not found: ${scopeName}/${context.id}`,
+      { subtype: ERROR_SUBTYPES.NOT_FOUND }
+    )
+    // The stored row serves the permission check and the hooks, and keeps a
+    // cleared link to a hidden target. A field setter runs before the UPDATE, so
+    // it would answer before a missing row does, and a full response's get runs
+    // with this context, whose minimal record its hooks see: both read too.
+    // Otherwise the UPDATE carries the caller's scope (see storedRowRead).
+    const usesRow = context.returning === 'full' || manyToManyRelationships.length > 0 || reverseRelationships.length > 0 ||
+      Object.values(belongsToUpdates).includes(null) || (context.schemaInfo.sortedSetterFields || []).length > 0
+    const reads = storedRowRead({ context, params, api, scopeName, helpers, hookNames, usesRow })
+    const callerScope = reads === 'none' ? (await recordScope({ context, helpers, scopeName, runHooks })).query : undefined
+    if (reads !== 'none') {
+      // Fetch minimal record for authorization checks
+      const minimalRecord = await helpers.dataGetMinimal({
+        scopeName,
+        context,
+        runHooks,
+        idsOnly: reads === 'id'
+      })
+      if (!minimalRecord) throw notFound()
+      if (reads === 'row') {
+        context.minimalRecord = minimalRecord
+        await keepHiddenLinks({ context, scopes, schemaInfo: context.schemaInfo, rows: [{ updates: belongsToUpdates, stored: minimalRecord, inputRecord: context.inputRecord }] })
+      }
     }
-
-    context.minimalRecord = minimalRecord
-    await keepHiddenLinks({ context, scopes, schemaInfo: context.schemaInfo, rows: [{ updates: belongsToUpdates, stored: minimalRecord, inputRecord: context.inputRecord }] })
 
     await scope.checkPermissions({
       method: 'patch',
@@ -126,7 +139,10 @@ export default async function patchMethod ({
 
     await helpers.dataPatch({
       scopeName,
-      context
+      context,
+      // Without a read first, a row the UPDATE does not find is missing as the read
+      // would have answered; after one, it went or moved since, as before.
+      ...(callerScope ? { scope: callerScope, notFound } : {})
     })
 
     await invalidateInverseVersions({ state: inverseVersions, context, helpers, api })

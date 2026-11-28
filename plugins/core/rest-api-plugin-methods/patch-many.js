@@ -42,6 +42,26 @@ import {
 export const VISIBLE_READ_CHUNK = 1000
 export const VISIBLE_PAGE_SIZE = 10000
 
+/**
+ * The listed rows the caller may write, by id, one scoped read per chunk: each
+ * row's minimal record when `readsRows` (a permission check or a cleared link
+ * reads it), otherwise its id alone, as a selection's page reads them.
+ * @param {any} args
+ * @param {{ ids: unknown[], readsRows: boolean, storageAdapter: any }} request
+ * @returns {Promise<Map<string, any>>}
+ */
+export async function visibleRows ({ helpers, scopeName, context, runHooks }, { ids, readsRows, storageAdapter }) {
+  const visible = new Map()
+  const idsAlone = !readsRows && typeof helpers.dataVisibleIds === 'function'
+  for (const part of chunk(ids, VISIBLE_READ_CHUNK)) {
+    const records = idsAlone
+      ? (await helpers.dataVisibleIds({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write' })).map((/** @type {unknown} */ id) => ({ type: scopeName, id: String(id) }))
+      : await helpers.dataGetMinimal({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write' })
+    for (const record of records) visible.set(String(storageAdapter.translateFilterValue('id', record.id)), record)
+  }
+  return visible
+}
+
 const invalid = (field, message) => new RestApiValidationError(message, { fields: [field], violations: [{ field, rule: 'many_row_input', message }] })
 
 // Fields a many-row patch may never change: identity, ownership and the lock version.
@@ -166,11 +186,9 @@ async function runPatchMany (args, { operation, entries, started = false, select
   const scoped = Boolean(selection) || !readFirst
   let keptRows = rows
   if (readFirst) {
-    const visible = new Map()
-    for (const part of chunk(rows.map(row => row.rowContext.id), VISIBLE_READ_CHUNK)) {
-      const records = await helpers.dataGetMinimal({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write' })
-      for (const record of records) visible.set(String(storageAdapter.translateFilterValue('id', record.id)), record)
-    }
+    const visible = await visibleRows(args, {
+      ids: rows.map(row => row.rowContext.id), readsRows: hasHooks('checkPermissions') || rows.some(row => row.clearsLink), storageAdapter
+    })
     const kept = keepVisible({ requested: rows.map(row => row.rowContext.id), visible, missing, scopeName, storageAdapter })
     keptRows = rows.filter(row => kept.includes(row.rowContext.id))
     for (const { rowContext } of keptRows) {

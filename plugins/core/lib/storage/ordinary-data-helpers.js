@@ -394,6 +394,10 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     }
     // A record this transaction has locked, read as its locking reads see it (see above).
     if (locked && databaseFamily(db) === 'mysql') query.forShare()
+    if (idsOnly) {
+      const found = await applyDatabaseReadOptions(query.select({ id: identities.id })).first()
+      return found ? { type: scopeName, id: String(found.id) } : null
+    }
     const record = await applyDatabaseReadOptions(query.select(`${tableName}.*`, identities)).first()
 
     if (!record) {
@@ -704,7 +708,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
   }
 
   /** @type {OrdinaryDataWriteHelpers['dataPatch']} */
-  const dataPatch = async ({ scopeName, context }) => {
+  const dataPatch = async ({ scopeName, context, scope, notFound }) => {
     const storageAdapter = getScopeStorageAdapter(scopeName)
     context.storageAdapter = storageAdapter
     const id = context.id
@@ -730,12 +734,12 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
     delete finalAttributes[idProperty]
     advanceLockVersion(finalAttributes, context, storageAdapter, db)
 
-    const row = foundRow({ byId: () => db(tableName).where(`${tableName}.${idProperty}`, id), context, scopeName, storageAdapter, tableName })
-    await updateFoundRow(row, { db, scopeName, id, idColumn: `${tableName}.${idProperty}`, values: finalAttributes })
+    const row = foundRow({ byId: () => db(tableName).where(`${tableName}.${idProperty}`, id), context, scopeName, storageAdapter, tableName, scope })
+    await updateFoundRow(row, { db, scopeName, id, idColumn: `${tableName}.${idProperty}`, values: finalAttributes, notFound })
   }
 
   /** @type {OrdinaryDataWriteHelpers['dataDelete']} */
-  const dataDelete = async ({ scopeName, context }) => {
+  const dataDelete = async ({ scopeName, context, scope }) => {
     const storageAdapter = getScopeStorageAdapter(scopeName)
     context.storageAdapter = storageAdapter
     const id = context.id
@@ -746,7 +750,7 @@ export function createOrdinaryDataHelpers ({ api, scopes, knex, log, getScopeSto
 
     log.debug(`[Knex] DELETE ${tableName}/${id}`)
 
-    const row = foundRow({ byId: () => db(tableName).where(`${tableName}.${idProperty}`, id), context, scopeName, storageAdapter, tableName })
+    const row = foundRow({ byId: () => db(tableName).where(`${tableName}.${idProperty}`, id), context, scopeName, storageAdapter, tableName, scope })
     // Before the DELETE: an ON DELETE CASCADE would remove the links that tell which parents to advance.
     await invalidateDeletedPivotTargets(api, scopeName, context, () => lockFoundRow(row, { scopeName, id, idColumn: `${tableName}.${idProperty}` }))
     await deleteFoundRow(row, { scopeName, id })

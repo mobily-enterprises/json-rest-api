@@ -6,7 +6,7 @@ import { initializeResourceVersion, applyResourceVersion, captureInverseVersions
 import { beginWriteTransaction } from '../../../lib/error-context.js'
 import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import { RestApiResourceError } from '../../../lib/rest-api-errors.js'
-import { commitOwnedTransaction, handleWriteMethodError, writePrecondition } from './common.js'
+import { commitOwnedTransaction, handleWriteMethodError, recordScope, storedRowRead, writePrecondition } from './common.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
 
 /**
@@ -22,6 +22,7 @@ export default async function deleteMethod ({
   scope,
   scopes,
   runHooks,
+  hookNames,
   scopeOptions,
   scopeName,
   api,
@@ -52,26 +53,36 @@ export default async function deleteMethod ({
   try {
     const versionState = initializeResourceVersion({ context, expectedVersion: params.expectedVersion })
 
-    // Fetch minimal record for authorization and logging
-    const minimalRecord = await helpers.dataGetMinimal({
-      scopeName,
-      context,
-      runHooks
-    })
+    // The stored row serves the permission check and the hooks; otherwise the
+    // DELETE carries the caller's scope (see storedRowRead), and a row it does
+    // not find is not found, with the same error.
+    const reads = storedRowRead({ context, params, api, scopeName, helpers, hookNames })
+    const callerScope = reads === 'none' ? (await recordScope({ context, helpers, scopeName, runHooks })).query : undefined
+    if (reads !== 'none') {
+      // Fetch minimal record for authorization and logging
+      const minimalRecord = await helpers.dataGetMinimal({
+        scopeName,
+        context,
+        runHooks,
+        idsOnly: reads === 'id'
+      })
 
-    if (!minimalRecord) {
-      throw new RestApiResourceError(
-        'Resource not found',
-        {
-          subtype: 'not_found',
-          resourceType: scopeName,
-          resourceId: context.id
-        }
-      )
+      if (!minimalRecord) {
+        throw new RestApiResourceError(
+          'Resource not found',
+          {
+            subtype: 'not_found',
+            resourceType: scopeName,
+            resourceId: context.id
+          }
+        )
+      }
+
+      if (reads === 'row') {
+        context.originalMinimalRecord = minimalRecord
+        context.minimalRecord = minimalRecord
+      }
     }
-
-    context.originalMinimalRecord = minimalRecord
-    context.minimalRecord = minimalRecord
 
     await scope.checkPermissions({
       method: 'delete',
@@ -93,7 +104,8 @@ export default async function deleteMethod ({
     // Call the storage helper
     await helpers.dataDelete({
       scopeName,
-      context
+      context,
+      scope: callerScope
     })
 
     await invalidateInverseVersions({ state: inverseVersions, context, helpers, api, isDelete: true })

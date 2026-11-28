@@ -6,7 +6,6 @@ import { beginWriteTransaction } from '../../../lib/error-context.js'
 import { RestApiRecordsNotFoundError, RestApiValidationError } from '../../../lib/rest-api-errors.js'
 import { rejectRemovedOptions, resolveFormat } from '../lib/querying-writing/response-options.js'
 import { requireExistingResourceId } from '../lib/querying-writing/resource-id-normalization.js'
-import { chunk } from '../lib/storage/many-row-data-helpers.js'
 import { databaseFamily } from '../lib/querying-writing/database-capabilities.js'
 import { commitOwnedTransaction, handleWriteMethodError } from './common.js'
 import {
@@ -21,7 +20,7 @@ import {
   unsupported,
   validateFilters
 } from './many-row-common.js'
-import { VISIBLE_READ_CHUNK, visibleIdsByFilters } from './patch-many.js'
+import { visibleIdsByFilters, visibleRows } from './patch-many.js'
 
 function setup ({ params, context, scopes, scopeName }, method) {
   context.method = method
@@ -58,11 +57,7 @@ async function runDeleteMany (args, { operation, ids, started = false, selection
   const scoped = Boolean(selection) || !readFirst
   let kept = ids
   if (readFirst) {
-    const visible = new Map()
-    for (const part of chunk(ids, VISIBLE_READ_CHUNK)) {
-      const records = await helpers.dataGetMinimal({ scopeName, context, runHooks, ids: part, filters: {}, queryPurpose: 'bulk-write' })
-      for (const record of records) visible.set(String(storageAdapter.translateFilterValue('id', record.id)), record)
-    }
+    const visible = await visibleRows(args, { ids, readsRows: hasHooks('checkPermissions'), storageAdapter })
     kept = keepVisible({ requested: ids, visible, missing, scopeName, storageAdapter })
     // bulkIndex is the id's position in the request.
     const positions = new Map(ids.map((id, index) => [String(storageAdapter.translateFilterValue('id', id)), index]))

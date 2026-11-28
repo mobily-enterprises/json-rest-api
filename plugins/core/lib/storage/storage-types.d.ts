@@ -237,8 +237,13 @@ export interface DataWriteHelpers<UpdateResult, DeleteResult> {
   dataPatch: (request: {
     scopeName: string
     context: DataWriteContext & DataIdentityContext
+    // The caller's scope as a query of the ids it may write (see recordScope): the UPDATE finds the row itself, in it,
+    // with no read first.
+    scope?: StorageQuery
+    // The error when the UPDATE finds no row; storage's own not-found error by default.
+    notFound?: (scopeName: string, id: string | number) => Error
   }) => Promise<UpdateResult>
-  dataDelete: (request: { scopeName: string, context: DataIdentityContext }) => Promise<DeleteResult>
+  dataDelete: (request: { scopeName: string, context: DataIdentityContext, scope?: StorageQuery }) => Promise<DeleteResult>
 }
 
 export type OrdinaryDataWriteHelpers = DataWriteHelpers<void, { success: true }>
@@ -301,7 +306,7 @@ export interface DataMinimalRequest extends DataReadRequest {
    * else a shared lock). The scope stays in a subquery, whose rows it does not lock.
    */
   lock?: { exclusive?: boolean, keyShare?: boolean }
-  /** With ids: read only the ids, as `{ type, id }` records without attributes. */
+  /** Read only the ids, as `{ type, id }` records without attributes (of one record: one, or null). */
   idsOnly?: boolean
   applyQueryFilters?: (params: QueryFilteringState & { query: StorageQuery }) => Promise<{ query: QueryBuilderResult } | null | undefined>
 }

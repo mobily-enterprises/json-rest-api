@@ -7,7 +7,7 @@
  * } from './lifecycle-types.js' */
 /** @import { StorageRow } from '../lib/storage/storage-types.js' */
 /** @import { RuntimeLogger } from '../../../types/runtime.js' */
-import { initializeResourceVersion } from '../lib/writing/resource-version.js'
+import { initializeResourceVersion, inverseVersionTypes } from '../lib/writing/resource-version.js'
 import {
   RestApiIncludeError,
   RestApiResourceError,
@@ -613,6 +613,55 @@ export const applyFieldSetters = async (context, api, helpers) => {
   }
 
   context.inputRecord.data.attributes = transformedAttributes
+}
+
+// The events whose hooks can see a single patch's or delete's stored row
+// (context.minimalRecord, and originalMinimalRecord after the data call).
+const STORED_ROW_EVENTS = {
+  patch: ['checkPermissions', 'beforeDataCall', 'beforeDataCallPatch', 'afterDataCallPatch', 'afterDataCall', 'finish', 'finishPatch', 'afterCommit', 'afterRollback', 'transport:response'],
+  delete: ['checkPermissions', 'beforeDataCall', 'beforeDataCallDelete', 'afterDataCallDelete', 'afterDataCall', 'finish', 'finishDelete', 'afterCommit', 'afterRollback', 'transport:response']
+}
+// The library's refusal of a write to a shared row, which reads the row's owner
+// on a resource with shared owners, outside a system context.
+const SHARED_ROW_REFUSALS = new Set(['autofilter-shared-row-patch', 'autofilter-shared-row-delete'])
+
+/**
+ * What a single patch or delete reads before its UPDATE or DELETE:
+ * - 'row', the stored row's minimal record, when anything uses it: a hook that
+ *   can see it, a precondition, a revision, or what the method names in `usesRow`;
+ * - otherwise 'none': nothing. The statement carries the caller's scope
+ *   (recordScope) and its count tells whether the caller may write the row,
+ *   which is missing otherwise, as the read would have answered;
+ * - or 'id' on MySQL and MariaDB: the id alone, since their UPDATE and DELETE
+ *   lock each row they examine before checking the rest of their WHERE (by id
+ *   alone, a row the caller cannot see) and refuse a subquery of their own table.
+ * @param {{ context: any, params: any, api: any, scopeName: string, helpers: LifecycleHelpers, hookNames: (event: string) => string[], usesRow?: boolean }} write
+ * @returns {'row' | 'id' | 'none'}
+ */
+export function storedRowRead ({ context, params, api, scopeName, helpers, hookNames, usesRow = false }) {
+  const { schemaInfo } = context
+  const refusesShared = !isSystemContext(context) && (schemaInfo.autofilter?.filters || []).some((/** @type {any} */ filter) => filter.shared)
+  const hooked = STORED_ROW_EVENTS[/** @type {'patch' | 'delete'} */ (context.method)]
+    .some(event => hookNames(event).some(name => refusesShared || !SHARED_ROW_REFUSALS.has(name)))
+  if (usesRow || hooked || params[writePrecondition] || schemaInfo.versionField || inverseVersionTypes(api, scopeName, schemaInfo).size ||
+    typeof /** @type {any} */ (helpers).dataScopedQuery !== 'function') return 'row'
+  return databaseFamily(context.db) === 'mysql' ? 'id' : 'none'
+}
+
+/**
+ * The caller's scope of the record a single write names, as `{ query }`, a
+ * query of its id for the write's statement to carry when it reads nothing
+ * first (storedRowRead). (A builder is thenable, so it comes wrapped.) Its
+ * filtering hooks run where and as the read's would, for the same purpose, and
+ * record the owner the statement repeats.
+ * @param {{ context: any, helpers: LifecycleHelpers, scopeName: string, runHooks: RunHooks }} write
+ */
+export async function recordScope ({ context, helpers, scopeName, runHooks }) {
+  const storageAdapter = /** @type {any} */ (helpers).getStorageAdapter(scopeName)
+  const tableName = storageAdapter.getTableName()
+  const idColumn = `${tableName}.${storageAdapter.getIdColumn()}`
+  const { query } = await /** @type {any} */ (helpers).dataScopedQuery({ scopeName, context, runHooks, alias: tableName, purpose: 'single', filters: context.queryParams?.filters })
+  return { query: query.where(idColumn, context.id).clearSelect().select(idColumn) }
 }
 
 /**
